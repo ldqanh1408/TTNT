@@ -1,0 +1,2 @@
+numpy>=1.24.0
+pygame-ce>=2.5.0  # pygame-ce supports Python 3.14+; use pygame>=2.5.0 for older Python
