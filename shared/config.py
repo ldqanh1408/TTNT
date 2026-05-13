@@ -60,7 +60,7 @@ JUMP_VEL = 18.5    # px/frame  — clearance ~148px
 # ─── Tốc độ game ──────────────────────────────────────────
 INIT_SPEED      = 6.0
 SPEED_INCREMENT = 0.005   # tăng nhanh hơn 5x
-MAX_SPEED       = 28.0
+MAX_SPEED       = 16.0
 
 # ─── Chướng ngại vật (kích thước tham khảo – sau scale) ───
 # Giá trị này chỉ dùng để tham khảo / fallback; kích thước thật
@@ -74,7 +74,9 @@ BIRD_W = 64   # sau BIRD_SCALE=0.70
 BIRD_H = 56
 
 # ─── State / Action ───────────────────────────────────────
-STATE_SIZE  = 6
+# 12 = 2 obstacles × 5 features + 1 speed + 1 pad
+#   per obstacle: [dist, height, width, is_bird, bird_height]
+STATE_SIZE  = 12
 ACTION_SIZE = 3
 
 # ─── Training ─────────────────────────────────────────────
