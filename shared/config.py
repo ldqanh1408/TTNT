@@ -60,7 +60,7 @@ JUMP_VEL = 18.5    # px/frame  — clearance ~148px
 # ─── Tốc độ game ──────────────────────────────────────────
 INIT_SPEED      = 6.0
 SPEED_INCREMENT = 0.005   # tăng nhanh hơn 5x
-MAX_SPEED       = 16.0
+MAX_SPEED       = 28.0
 
 # ─── Chướng ngại vật (kích thước tham khảo – sau scale) ───
 # Giá trị này chỉ dùng để tham khảo / fallback; kích thước thật
