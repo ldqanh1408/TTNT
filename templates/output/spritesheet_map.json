@@ -1,0 +1,392 @@
+{
+  "dino.png": [
+    {
+      "name": "dino_0.png",
+      "width": 88,
+      "height": 95,
+      "sprite_name": "dino_idle"
+    },
+    {
+      "name": "dino_1.png",
+      "width": 88,
+      "height": 95,
+      "sprite_name": "dino_run_1"
+    },
+    {
+      "name": "dino_2.png",
+      "width": 88,
+      "height": 95,
+      "sprite_name": "dino_run_2"
+    },
+    {
+      "name": "dino_3.png",
+      "width": 88,
+      "height": 95,
+      "sprite_name": "dino_jump"
+    },
+    {
+      "name": "dino_4.png",
+      "width": 88,
+      "height": 95,
+      "sprite_name": "dino_dead"
+    }
+  ],
+  "dino_ducking.png": [
+    {
+      "name": "dino_ducking_0.png",
+      "width": 118,
+      "height": 95,
+      "sprite_name": "dino_duck_1"
+    },
+    {
+      "name": "dino_ducking_1.png",
+      "width": 118,
+      "height": 95,
+      "sprite_name": "dino_duck_2"
+    }
+  ],
+  "ptera.png": [
+    {
+      "name": "ptera_0.png",
+      "width": 92,
+      "height": 81,
+      "sprite_name": "ptera_1"
+    },
+    {
+      "name": "ptera_1.png",
+      "width": 92,
+      "height": 81,
+      "sprite_name": "ptera_2"
+    }
+  ],
+  "cacti-small.png": [
+    {
+      "name": "cacti-small_0.png",
+      "width": 68,
+      "height": 69,
+      "sprite_name": "cactus_small_0"
+    },
+    {
+      "name": "cacti-small_1.png",
+      "width": 68,
+      "height": 69,
+      "sprite_name": "cactus_small_1"
+    },
+    {
+      "name": "cacti-small_2.png",
+      "width": 68,
+      "height": 69,
+      "sprite_name": "cactus_small_2"
+    }
+  ],
+  "cacti-big.png": [
+    {
+      "name": "cacti-big_0.png",
+      "width": 60,
+      "height": 100,
+      "sprite_name": "cactus_big_0"
+    },
+    {
+      "name": "cacti-big_1.png",
+      "width": 60,
+      "height": 100,
+      "sprite_name": "cactus_big_1"
+    },
+    {
+      "name": "cacti-big_2.png",
+      "width": 60,
+      "height": 100,
+      "sprite_name": "cactus_big_2"
+    },
+    {
+      "name": "cacti-big_3.png",
+      "width": 60,
+      "height": 100,
+      "sprite_name": "cactus_big_3"
+    },
+    {
+      "name": "cacti-big_4.png",
+      "width": 60,
+      "height": 100,
+      "sprite_name": "cactus_big_4"
+    }
+  ],
+  "numbers.png": [
+    {
+      "name": "numbers_0.png",
+      "width": 20,
+      "height": 23,
+      "sprite_name": "char_0"
+    },
+    {
+      "name": "numbers_1.png",
+      "width": 18,
+      "height": 23,
+      "sprite_name": "char_1"
+    },
+    {
+      "name": "numbers_2.png",
+      "width": 20,
+      "height": 23,
+      "sprite_name": "char_2"
+    },
+    {
+      "name": "numbers_3.png",
+      "width": 20,
+      "height": 23,
+      "sprite_name": "char_3"
+    },
+    {
+      "name": "numbers_4.png",
+      "width": 20,
+      "height": 23,
+      "sprite_name": "char_4"
+    },
+    {
+      "name": "numbers_5.png",
+      "width": 20,
+      "height": 23,
+      "sprite_name": "char_5"
+    },
+    {
+      "name": "numbers_6.png",
+      "width": 20,
+      "height": 23,
+      "sprite_name": "char_6"
+    },
+    {
+      "name": "numbers_7.png",
+      "width": 20,
+      "height": 23,
+      "sprite_name": "char_7"
+    },
+    {
+      "name": "numbers_8.png",
+      "width": 20,
+      "height": 23,
+      "sprite_name": "char_8"
+    },
+    {
+      "name": "numbers_9.png",
+      "width": 20,
+      "height": 23,
+      "sprite_name": "char_9"
+    },
+    {
+      "name": "numbers_10.png",
+      "width": 20,
+      "height": 23,
+      "sprite_name": "char_H"
+    },
+    {
+      "name": "numbers_11.png",
+      "width": 18,
+      "height": 23,
+      "sprite_name": "char_I"
+    }
+  ],
+  "red_dino1.png": [
+    {
+      "name": "red_dino1_0.png",
+      "width": 88,
+      "height": 95,
+      "sprite_name": "red_dino_idle"
+    },
+    {
+      "name": "red_dino1_1.png",
+      "width": 88,
+      "height": 95,
+      "sprite_name": "red_dino_run_1"
+    },
+    {
+      "name": "red_dino1_2.png",
+      "width": 88,
+      "height": 95,
+      "sprite_name": "red_dino_run_2"
+    },
+    {
+      "name": "red_dino1_3.png",
+      "width": 88,
+      "height": 95,
+      "sprite_name": "red_dino_jump"
+    },
+    {
+      "name": "red_dino1_4.png",
+      "width": 88,
+      "height": 95,
+      "sprite_name": "red_dino_dead"
+    }
+  ],
+  "offline-sprite-2x-black.png": [
+    {
+      "name": "offline-sprite-2x-black_0.png",
+      "width": 74,
+      "height": 102,
+      "sprite_name": "offline-sprite-2x-black_0"
+    },
+    {
+      "name": "offline-sprite-2x-black_1.png",
+      "width": 90,
+      "height": 102,
+      "sprite_name": "offline-sprite-2x-black_1"
+    },
+    {
+      "name": "offline-sprite-2x-black_2.png",
+      "width": 86,
+      "height": 102,
+      "sprite_name": "offline-sprite-2x-black_2"
+    },
+    {
+      "name": "offline-sprite-2x-black_3.png",
+      "width": 186,
+      "height": 102,
+      "sprite_name": "offline-sprite-2x-black_3"
+    },
+    {
+      "name": "offline-sprite-2x-black_4.png",
+      "width": 70,
+      "height": 102,
+      "sprite_name": "offline-sprite-2x-black_4"
+    },
+    {
+      "name": "offline-sprite-2x-black_5.png",
+      "width": 32,
+      "height": 102,
+      "sprite_name": "offline-sprite-2x-black_5"
+    },
+    {
+      "name": "offline-sprite-2x-black_6.png",
+      "width": 70,
+      "height": 102,
+      "sprite_name": "offline-sprite-2x-black_6"
+    },
+    {
+      "name": "offline-sprite-2x-black_7.png",
+      "width": 32,
+      "height": 102,
+      "sprite_name": "offline-sprite-2x-black_7"
+    },
+    {
+      "name": "offline-sprite-2x-black_8.png",
+      "width": 100,
+      "height": 102,
+      "sprite_name": "offline-sprite-2x-black_8"
+    },
+    {
+      "name": "offline-sprite-2x-black_9.png",
+      "width": 202,
+      "height": 102,
+      "sprite_name": "offline-sprite-2x-black_9"
+    },
+    {
+      "name": "offline-sprite-2x-black_10.png",
+      "width": 18,
+      "height": 102,
+      "sprite_name": "offline-sprite-2x-black_10"
+    },
+    {
+      "name": "offline-sprite-2x-black_11.png",
+      "width": 40,
+      "height": 102,
+      "sprite_name": "offline-sprite-2x-black_11"
+    },
+    {
+      "name": "offline-sprite-2x-black_12.png",
+      "width": 40,
+      "height": 102,
+      "sprite_name": "offline-sprite-2x-black_12"
+    },
+    {
+      "name": "offline-sprite-2x-black_13.png",
+      "width": 20,
+      "height": 102,
+      "sprite_name": "offline-sprite-2x-black_13"
+    },
+    {
+      "name": "offline-sprite-2x-black_14.png",
+      "width": 40,
+      "height": 102,
+      "sprite_name": "offline-sprite-2x-black_14"
+    },
+    {
+      "name": "offline-sprite-2x-black_15.png",
+      "width": 20,
+      "height": 102,
+      "sprite_name": "offline-sprite-2x-black_15"
+    },
+    {
+      "name": "offline-sprite-2x-black_16.png",
+      "width": 40,
+      "height": 102,
+      "sprite_name": "offline-sprite-2x-black_16"
+    },
+    {
+      "name": "offline-sprite-2x-black_17.png",
+      "width": 23,
+      "height": 102,
+      "sprite_name": "offline-sprite-2x-black_17"
+    },
+    {
+      "name": "offline-sprite-2x-black_18.png",
+      "width": 23,
+      "height": 102,
+      "sprite_name": "offline-sprite-2x-black_18"
+    },
+    {
+      "name": "offline-sprite-2x-black_19.png",
+      "width": 442,
+      "height": 102,
+      "sprite_name": "offline-sprite-2x-black_19"
+    },
+    {
+      "name": "offline-sprite-2x-black_20.png",
+      "width": 82,
+      "height": 102,
+      "sprite_name": "offline-sprite-2x-black_20"
+    },
+    {
+      "name": "offline-sprite-2x-black_21.png",
+      "width": 238,
+      "height": 102,
+      "sprite_name": "offline-sprite-2x-black_21"
+    },
+    {
+      "name": "offline-sprite-2x-black_22.png",
+      "width": 2402,
+      "height": 26,
+      "sprite_name": "offline-sprite-2x-black_22"
+    }
+  ],
+  "cloud.png": [
+    {
+      "name": "cloud_0.png",
+      "width": 90,
+      "height": 42,
+      "sprite_name": "cloud"
+    }
+  ],
+  "ground.png": [
+    {
+      "name": "ground_0.png",
+      "width": 1203,
+      "height": 19,
+      "sprite_name": "ground"
+    }
+  ],
+  "game_over.png": [
+    {
+      "name": "game_over_0.png",
+      "width": 381,
+      "height": 22,
+      "sprite_name": "game_over"
+    }
+  ],
+  "replay_button.png": [
+    {
+      "name": "replay_button_0.png",
+      "width": 69,
+      "height": 62,
+      "sprite_name": "replay_button"
+    }
+  ]
+}

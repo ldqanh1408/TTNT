@@ -6,13 +6,14 @@
 #    QNetwork      – mạng nơ-ron dự đoán Q-value
 #    DQNDinoAI     – lớp AI chính, kế thừa BaseDinoAI
 #
-#  State (6 chiều):
+#  State (12 chiều = 2 vật gần nhất × 6 features):
 #    [0] dist_to_obs     – khoảng cách đến chướng ngại / SCREEN_W
 #    [1] obs_height      – độ cao đáy chướng ngại / ground_y
 #    [2] obs_width       – chiều rộng chướng ngại / 60
 #    [3] is_bird         – 1.0 nếu là chim, 0.0 nếu xương rồng
 #    [4] bird_height     – chiều cao chim so với mặt đất
 #    [5] speed_ratio     – game_speed / MAX_SPEED
+#    [6-11]              – lặp lại cho vật thứ 2
 #
 #  Action:
 #    0 = cúi (duck)
@@ -39,31 +40,31 @@ from shared.base_ai import BaseDinoAI
 DQN_CONFIG = {
     # Kiến trúc mạng
     "hidden_sizes"   : [128, 128],   # kích thước các lớp ẩn
-    "state_size"     : 12,
+    "state_size"     : 12,           # 2 vật × 6 features
     "action_size"    : 3,
 
     # Replay buffer
-    "buffer_capacity": 50_000,       # số transition lưu tối đa
+    "buffer_capacity": 50_000,
     "batch_size"     : 64,
 
     # Học tập
-    "lr"             : 1e-3,         # learning rate
-    "gamma"          : 0.97,         # discount factor
-    "tau"            : 0.005,        # soft-update target network
+    "lr"             : 1e-3,
+    "gamma"          : 0.97,
+    "tau"            : 0.005,
 
-    # Epsilon-greedy (khám phá → khai thác)
+    # Epsilon-greedy
+    # FIX: 0.9995 → 0.995 (nhanh hơn 6×, về ~0.05 sau ~600 ep thay vì ~6000 ep)
     "eps_start"      : 1.0,
     "eps_end"        : 0.05,
-    "eps_decay"      : 0.9995,       # nhân sau mỗi episode
+    "eps_decay"      : 0.995,
 
     # Target network update
-    "target_update_freq": 200,       # bước (step) giữa 2 lần hard-update
-                                     # (chỉ dùng nếu KHÔNG dùng soft-update)
-    "use_soft_update": True,         # True = soft-update mỗi bước, khuyến nghị
+    "target_update_freq": 200,
+    "use_soft_update": True,
 
     # Training
-    "learn_start"    : 1_000,        # bắt đầu học sau khi có đủ mẫu trong buffer
-    "learn_every"    : 4,            # học 1 lần sau mỗi N bước
+    "learn_start"    : 1_000,
+    "learn_every"    : 4,
 }
 
 
@@ -138,14 +139,13 @@ class DQNDinoAI(BaseDinoAI):
 
     def __init__(self, config: dict = None, name: str = "DQN-Dino"):
         super().__init__(name=name)
-        self.cfg   = config or DQN_CONFIG
+        self.cfg    = config or DQN_CONFIG
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         s = self.cfg["state_size"]
         a = self.cfg["action_size"]
         h = self.cfg["hidden_sizes"]
 
-        # Hai mạng: online (học) và target (ổn định)
         self.q_net      = QNetwork(s, a, h).to(self.device)
         self.target_net = QNetwork(s, a, h).to(self.device)
         self.target_net.load_state_dict(self.q_net.state_dict())
@@ -155,21 +155,20 @@ class DQNDinoAI(BaseDinoAI):
                                     lr=self.cfg["lr"])
         self.loss_fn   = nn.MSELoss()
 
-        self.buffer  = ReplayBuffer(self.cfg["buffer_capacity"])
-        self.epsilon = self.cfg["eps_start"]
-        self.steps   = 0          # tổng bước đã đi
-        self.losses  = []         # lịch sử loss để theo dõi
+        self.buffer   = ReplayBuffer(self.cfg["buffer_capacity"])
+        self.epsilon  = self.cfg["eps_start"]
+        self.steps    = 0
+        self.losses   = []
 
         print(f"[{self.name}] Khởi tạo xong. Device: {self.device}")
         print(f"  Mạng: {s} → {h} → {a}")
 
-    # ── Dự đoán action (dùng khi play / evaluate) ──────────
+    # ── Dự đoán action ─────────────────────────────────────
 
     def predict(self, state: np.ndarray) -> int:
-        """Greedy: chọn action có Q-value cao nhất (epsilon=0)."""
         return self._select_action(state, training=False)
 
-    # ── Chọn action (epsilon-greedy khi train) ─────────────
+    # ── Chọn action (epsilon-greedy) ───────────────────────
 
     def _select_action(self, state: np.ndarray,
                        training: bool = True) -> int:
@@ -182,7 +181,7 @@ class DQNDinoAI(BaseDinoAI):
             q = self.q_net(t)
             return int(q.argmax().item())
 
-    # ── Học từ một batch trong replay buffer ───────────────
+    # ── Học từ replay buffer ───────────────────────────────
 
     def _learn(self):
         if len(self.buffer) < self.cfg["learn_start"]:
@@ -197,24 +196,20 @@ class DQNDinoAI(BaseDinoAI):
         ns = torch.FloatTensor(next_states).to(self.device)
         d  = torch.FloatTensor(dones).unsqueeze(1).to(self.device)
 
-        # Q hiện tại
         current_q = self.q_net(s).gather(1, a)
 
-        # Q target (Bellman)
         with torch.no_grad():
-            # Double DQN: online chọn action, target tính giá trị
-            best_a  = self.q_net(ns).argmax(1, keepdim=True)
-            next_q  = self.target_net(ns).gather(1, best_a)
+            # Double DQN
+            best_a   = self.q_net(ns).argmax(1, keepdim=True)
+            next_q   = self.target_net(ns).gather(1, best_a)
             target_q = r + self.cfg["gamma"] * next_q * (1 - d)
 
         loss = self.loss_fn(current_q, target_q)
         self.optimizer.zero_grad()
         loss.backward()
-        # Gradient clipping tránh exploding gradient
         nn.utils.clip_grad_norm_(self.q_net.parameters(), max_norm=1.0)
         self.optimizer.step()
 
-        # Soft-update target network
         if self.cfg["use_soft_update"]:
             tau = self.cfg["tau"]
             for tp, op in zip(self.target_net.parameters(),
@@ -222,8 +217,6 @@ class DQNDinoAI(BaseDinoAI):
                 tp.data.copy_(tau * op.data + (1 - tau) * tp.data)
 
         self.losses.append(loss.item())
-
-    # ── Hard-update target network ─────────────────────────
 
     def _hard_update_target(self):
         self.target_net.load_state_dict(self.q_net.state_dict())
@@ -235,24 +228,22 @@ class DQNDinoAI(BaseDinoAI):
               verbose_every: int = 50,
               save_path: str = "models/dqn_checkpoint.pkl",
               **kwargs):
-        """
-        Huấn luyện DQN qua n_episodes episode.
 
-        Parameters
-        ----------
-        n_episodes      : số episode huấn luyện
-        max_steps_per_ep: bước tối đa mỗi episode (tránh vòng lặp mãi)
-        verbose_every   : in log sau mỗi N episode
-        save_path       : đường dẫn lưu checkpoint tốt nhất
-        """
         from shared.game_env import DinoEnv, Dinosaur
 
         print(f"\n{'='*55}")
         print(f"  BẮT ĐẦU HUẤN LUYỆN DQN – {n_episodes} episodes")
         print(f"  Device: {self.device}")
+        print(f"  eps_decay = {self.cfg['eps_decay']}  "
+              f"(về {self.cfg['eps_end']} sau ~"
+              f"{int(-(np.log(self.cfg['eps_end'] / self.cfg['eps_start'])) / (-np.log(self.cfg['eps_decay'])))}"
+              f" ep)")
         print(f"{'='*55}\n")
 
-        os.makedirs(os.path.dirname(save_path) if os.path.dirname(save_path) else ".", exist_ok=True)
+        os.makedirs(
+            os.path.dirname(save_path) if os.path.dirname(save_path) else ".",
+            exist_ok=True
+        )
 
         score_history = []
         best_score    = 0
@@ -269,12 +260,15 @@ class DQNDinoAI(BaseDinoAI):
                 action = self._select_action(state, training=True)
                 next_state, reward, done, info = env.step_single(dino, action)
 
-                # Reward shaping: thưởng thêm khi vừa né được chướng ngại
-                shaped_reward = reward
+                # ── Reward shaping ──────────────────────────────
+                # FIX: -100 → -10  (tỉ lệ chết/sống từ 50:1 → 5:1)
                 if done:
-                    shaped_reward = -100.0   # phạt nặng khi chết
+                    shaped_reward = -10.0
                 elif reward > 0:
-                    shaped_reward = 1.0 + env.game_speed * 0.1  # thưởng tăng dần
+                    shaped_reward = 1.0 + env.game_speed * 0.05
+                else:
+                    shaped_reward = 0.0
+                # ────────────────────────────────────────────────
 
                 self.buffer.push(state, action, shaped_reward, next_state, done)
                 state      = next_state
@@ -282,11 +276,9 @@ class DQNDinoAI(BaseDinoAI):
                 ep_steps  += 1
                 self.steps += 1
 
-                # Học sau mỗi learn_every bước
                 if self.steps % self.cfg["learn_every"] == 0:
                     self._learn()
 
-                # Hard-update (nếu không dùng soft-update)
                 if not self.cfg["use_soft_update"]:
                     if self.steps % self.cfg["target_update_freq"] == 0:
                         self._hard_update_target()
@@ -294,7 +286,7 @@ class DQNDinoAI(BaseDinoAI):
                 if done:
                     break
 
-            # Giảm epsilon sau mỗi episode
+            # Decay epsilon
             self.epsilon = max(self.cfg["eps_end"],
                                self.epsilon * self.cfg["eps_decay"])
 
@@ -303,16 +295,15 @@ class DQNDinoAI(BaseDinoAI):
             self.generation = ep
 
             if ep_score > best_score:
-                best_score       = ep_score
-                self.best_score  = best_score
+                best_score      = ep_score
+                self.best_score = best_score
                 self.save_model(save_path)
 
-            # Log
             if ep % verbose_every == 0:
-                recent     = score_history[-verbose_every:]
-                avg_score  = np.mean(recent)
-                avg_loss   = np.mean(self.losses[-200:]) if self.losses else 0
-                buf_size   = len(self.buffer)
+                recent    = score_history[-verbose_every:]
+                avg_score = np.mean(recent)
+                avg_loss  = np.mean(self.losses[-200:]) if self.losses else 0
+                buf_size  = len(self.buffer)
                 print(f"  Ep {ep:>5}/{n_episodes} | "
                       f"Score avg={avg_score:>7.1f} best={best_score:>6} | "
                       f"ε={self.epsilon:.3f} | "
@@ -328,7 +319,10 @@ class DQNDinoAI(BaseDinoAI):
     # ── Lưu / Tải model ────────────────────────────────────
 
     def save_model(self, path: str):
-        os.makedirs(os.path.dirname(path) if os.path.dirname(path) else ".", exist_ok=True)
+        os.makedirs(
+            os.path.dirname(path) if os.path.dirname(path) else ".",
+            exist_ok=True
+        )
         data = {
             "q_net_state"     : self.q_net.state_dict(),
             "target_net_state": self.target_net.state_dict(),
