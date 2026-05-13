@@ -138,8 +138,8 @@ class Dinosaur:
         return self._get_current_sprite()
 
     def get_rect(self) -> pygame.Rect:
-        margin_x = max(4, self.w // 5)
-        margin_y = max(2, self.h // 10)
+        margin_x = max(6, self.w // 5)
+        margin_y = max(5, self.h // 7)
         return pygame.Rect(
             self.x + margin_x,
             self.y + margin_y,
@@ -270,6 +270,21 @@ class Obstacle:
 
     def is_off_screen(self) -> bool:
         return self.x + self.w < 0
+
+    # ── Collision rect (margin riêng cho bird) ─────────────────
+    def get_rect(self) -> pygame.Rect:
+        if self.type_ == "bird":
+            margin_x = max(10, self.w // 4)
+            margin_y = max(10, self.h // 3)
+        else:
+            margin_x = max(4, self.w // 8)
+            margin_y = max(4, self.h // 8)
+        return pygame.Rect(
+            self.x + margin_x,
+            self.y + margin_y,
+            self.w - margin_x * 2,
+            self.h - margin_y * 2,
+        )
 
 
 class Ground:
@@ -425,13 +440,13 @@ class DinoEnv:
 
         if self.boost_timer > 0:
             self.boost_timer -= 1
-            self.game_speed = self._base_speed * 2.0   # x2 cố định
+            self.game_speed = self._base_speed * 1.5  # x2 cố định
         else:
             self.game_speed = self._base_speed
             self.boost_cooldown -= 1
             if self.boost_cooldown <= 0 and self._base_speed > INIT_SPEED * 0.9:
                 if random.random() < 0.005:
-                    self.boost_timer = 120              # 2s @ 60fps
+                    self.boost_timer = 60               # 1s @ 60fps
                     self.boost_cooldown = random.randint(180, 360)
 
         self._dino_speed_factor = self.game_speed / self._base_speed
@@ -466,21 +481,18 @@ class DinoEnv:
         if frames_since_spawn < self.next_spawn_at:
             return
 
+        # Đợi màn hình đủ thoáng mới spawn tiếp
         if self.obs:
             rightmost_x = max(ob.x + ob.w for ob in self.obs)
-            min_gap_px = int(SCREEN_W * 0.60)
-            actual_gap = (SCREEN_W + 20) - rightmost_x
-            if actual_gap < min_gap_px:
+            if (SCREEN_W + 20) - rightmost_x < int(SCREEN_W * 0.55):
                 return
 
-        has_cactus = any(ob.type_ != "bird" for ob in self.obs)
+        # Ptera spawn độc lập, xác suất tăng tuyến tính theo tốc độ
+        # Speed 10 → 0%,  speed 18+ → 30%,  không spawn ptera liên tiếp
+        spd          = self._base_speed
         ptera_chance = 0.0
-        if has_cactus:
-            nearest_cactus_x = min((ob.x for ob in self.obs if ob.type_ != "bird"), default=SCREEN_W)
-            if nearest_cactus_x > SCREEN_W * 0.4:
-                if self.last_obstacle_type != 'ptera':
-                    if self._base_speed > 13:
-                        ptera_chance = min(0.10, (self._base_speed - 13) * 0.03)
+        if spd >= 10 and self.last_obstacle_type != 'ptera':
+            ptera_chance = min(0.30, (spd - 10) / 27.0)
 
         if random.random() < ptera_chance:
             self._spawn_ptera()
@@ -505,19 +517,14 @@ class DinoEnv:
     def _spawn_cactus_cluster(self):
         base = self._base_speed
         if base < 8:
-            sizes   = [1, 2]
-            weights = [55, 45]
+            sizes, weights = [1, 2],       [55, 45]
         elif base < 11:
-            sizes   = [1, 2, 3]
-            weights = [35, 35, 30]
+            sizes, weights = [1, 2, 3],    [35, 35, 30]
         else:
-            sizes   = [1, 2, 3, 4]
-            weights = [25, 30, 25, 20]
-
-        cluster_size = random.choices(sizes, weights=weights)[0]
+            sizes, weights = [1, 2, 3, 4], [25, 30, 25, 20]
 
         offset = 0
-        for _ in range(cluster_size):
+        for _ in range(random.choices(sizes, weights=weights)[0]):
             obs    = Obstacle(base, self.sprites, force_type='cactus')
             obs.x += offset
             offset += obs.w + random.randint(8, 20)
@@ -526,31 +533,32 @@ class DinoEnv:
         self.last_obstacle_type = 'cactus'
 
     def _spawn_ptera(self):
+        """
+        3 cao độ rõ ràng, mỗi cái yêu cầu hành động khác nhau:
+          LOW  (sát đất)   → Duck
+          MID  (ngang lưng) → Jump hoặc Duck
+          HIGH (trên đầu)  → chạy thẳng (dino lọt qua dưới)
+        Trọng số dịch dần về HIGH khi tốc độ tăng.
+        """
         ground_top = SCREEN_H - GROUND_Y_OFFSET
+        obs        = Obstacle(self._base_speed, self.sprites, force_type='ptera')
+        ph         = obs.h
+        dino_h     = self.sprites.dino_h
 
-        tmp = Obstacle(self._base_speed, self.sprites, force_type='ptera')
-        ph  = tmp.h
+        low_y  = ground_top - ph - 5               # phải duck
+        mid_y  = ground_top - ph - (dino_h // 2)   # jump hoặc duck
+        high_y = ground_top - ph - dino_h - 25     # chạy thẳng lọt qua
 
-        cactus_small_top = ground_top - 32
-        ptera_high = ground_top - ph - 110
-        if ptera_high >= cactus_small_top:
-            heights = {
-                'low':  ground_top - ph - 10,
-                'mid':  ground_top - ph - 55,
-                'high': ptera_high,
-            }
+        spd = self._base_speed
+        if spd < 13:
+            weights = [40, 45, 15]
+        elif spd < 18:
+            weights = [25, 40, 35]
         else:
-            heights = {
-                'low':  ground_top - ph - 10,
-                'mid':  ground_top - ph - 55,
-                'high': ground_top - ph - 55,
-            }
+            weights = [15, 30, 55]
 
-        choice  = random.choices(['low', 'mid', 'high'], weights=[15, 40, 45])[0]
-        ptera_y = heights[choice]
-
-        obs = Obstacle(self._base_speed, self.sprites,
-                       force_type='ptera', ptera_y=ptera_y)
+        obs.y = random.choices([low_y, mid_y, high_y], weights=weights)[0]
+        obs.x = SCREEN_W + 20
         self.obs.append(obs)
         self.last_obstacle_type = 'ptera'
 
