@@ -24,7 +24,7 @@ def run_episode(ai: BaseDinoAI, render: bool = False,
     """
     env  = DinoEnv(render=render)
     dino = Dinosaur(env.sprites)
-    state = env.reset()
+    state = env.reset(dino)
 
     total_reward = 0.0
     hi_score = 0

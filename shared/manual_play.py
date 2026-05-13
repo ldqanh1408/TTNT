@@ -12,7 +12,7 @@ def manual_play():
     env  = DinoEnv(render=True)
     sprites = env.sprites
     dino = Dinosaur(sprites)
-    env.reset()
+    env.reset(dino)
     hi_score = 0
 
     running = True
@@ -47,6 +47,6 @@ def manual_play():
             print(f"\nGame over! Score: {score}  |  Best: {hi_score}")
             pygame.time.wait(1500)
             dino = Dinosaur(sprites)
-            env.reset()
+            env.reset(dino)
 
     env.close()

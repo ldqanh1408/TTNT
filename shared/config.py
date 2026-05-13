@@ -74,7 +74,9 @@ BIRD_W = 64   # sau BIRD_SCALE=0.70
 BIRD_H = 56
 
 # ─── State / Action ───────────────────────────────────────
-STATE_SIZE  = 6
+# 12 = 2 obstacles × 5 features + 1 speed + 1 pad
+#   per obstacle: [dist, height, width, is_bird, bird_height]
+STATE_SIZE  = 12
 ACTION_SIZE = 3
 
 # ─── Training ─────────────────────────────────────────────

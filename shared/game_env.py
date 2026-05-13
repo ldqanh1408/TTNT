@@ -79,7 +79,7 @@ class Dinosaur:
             self.is_jumping = True
 
     def duck(self):
-        if not self.is_jumping:
+        if not self.is_jumping and not self.is_ducking:
             self.is_ducking = True
             self._y_float   = float(SCREEN_H - GROUND_Y_OFFSET - self.duck_h)
             self.y          = int(self._y_float)
@@ -137,6 +137,21 @@ class Dinosaur:
             self.w - margin_x * 2,
             self.h - margin_y * 2,
         )
+
+    def reset(self):
+        """Reset dino to initial state for a new game."""
+        self.y          = self.ground_y
+        self._y_float  = float(self.ground_y)
+        self._vel_y    = 0.0
+        self.w         = self.sprites.dino_w
+        self.h         = self.sprites.dino_h
+        self.is_jumping = False
+        self.is_ducking = False
+        self.is_dead    = False
+        self.steps      = 0
+        self.score      = 0
+        self.counter    = 0
+        self.anim_idx   = 0
 
 
 # ─────────────────────────────────────────────────────────────
@@ -246,7 +261,8 @@ class Obstacle:
     # ── Init helpers ──────────────────────────────────────────
 
     def _init_small_cactus(self, speed: float):
-        v            = random.randint(0, 5)
+        n        = len(self.sprites._cactus_small)
+        v        = random.randint(0, n - 1)
         self.type_   = "cactus_small"
         self.variant = v
         self.sprite  = self.sprites.cactus_small(v)
@@ -404,12 +420,13 @@ class DinoEnv:
         self.clouds             = []
         self.nearest            = -1.0
         self.game_over          = False
+        self._cleared_count     = 0
         self.last_spawn_frame   = 0
         self.next_spawn_at      = 0
         self.last_obstacle_type = None
         self._base_speed        = INIT_SPEED
         self.boost_timer        = 0
-        self.boost_cooldown     = 0
+        self.boost_cooldown     = random.randint(180, 360)
         self.screen  = None
         self.clock   = None
         self.sprites = None
@@ -425,6 +442,9 @@ class DinoEnv:
             self.ground  = Ground(self.sprites)
             self._load_sounds()
             self._spawn_initial_clouds()
+            font_name = pygame.font.get_default_font()
+            self._font_14 = pygame.font.SysFont(font_name, 14, bold=False)
+            self._font_12 = pygame.font.SysFont(font_name, 12, bold=False)
         else:
             self.sprites = SpriteLoader()
             self.ground  = Ground(self.sprites)
@@ -452,7 +472,7 @@ class DinoEnv:
                 "speed": random.uniform(0.3, 0.8),
             })
 
-    def reset(self) -> np.ndarray:
+    def reset(self, dino: "Dinosaur | None" = None) -> np.ndarray:
         self.game_speed         = INIT_SPEED
         self.points             = 0
         self.obs                = []
@@ -461,17 +481,22 @@ class DinoEnv:
         self.clouds             = []
         self.nearest            = -1.0
         self.game_over          = False
+        self._cleared_count     = 0
         self.last_spawn_frame   = 0
         self.next_spawn_at      = 0
         self.last_obstacle_type = None
         self._base_speed        = INIT_SPEED
         self.boost_timer        = 0
-        self.boost_cooldown     = 0
+        self.boost_cooldown     = random.randint(180, 360)
         if self.ground:
             self.ground._x1 = 0.0
             self.ground._x2 = float(self.ground.w)
         if self.render:
             self._spawn_initial_clouds()
+
+        if dino is not None:
+            dino.reset()
+
         return self._build_state()
 
     def handle_events(self) -> bool:
@@ -501,7 +526,9 @@ class DinoEnv:
             dino.unduck()
 
         dino.update()
-        self._spawn_obstacle()
+        cleared = [ob for ob in self.obs if ob.x + ob.w < dino.x]
+        if cleared:
+            self._cleared_count += len(cleared)
         self._update_obstacles()
         self._update_clouds()
         self._check_collision(dino)
@@ -512,6 +539,8 @@ class DinoEnv:
             self.boost_timer -= 1
             if self.boost_timer == 0:
                 self.game_speed = self._base_speed
+                for ob in self.obs:
+                    ob.speed = self.game_speed
         else:
             self.game_speed = self._base_speed
             self.boost_cooldown -= 1
@@ -519,10 +548,17 @@ class DinoEnv:
                 if random.random() < 0.005:
                     self.boost_timer = 30
                     self.boost_cooldown = random.randint(180, 360)
-                    self.game_speed = min(self._base_speed * 2.0, MAX_SPEED)
+                    self.game_speed = min(self._base_speed * 1.5, MAX_SPEED)
+                    for ob in self.obs:
+                        ob.speed = self.game_speed
+
+        for ob in self.obs:
+            ob.speed = self.game_speed
+
+        self._spawn_obstacle()
 
         done   = dino.is_dead
-        reward = -50.0 if done else 1.0
+        reward = -50.0 if done else 1.0 + len(cleared) * 10.0
         if done:
             self.game_over = True
             self._play_sound("die")
@@ -635,7 +671,7 @@ class DinoEnv:
 
     def _update_clouds(self):
         for c in self.clouds:
-            c["x"] -= c["speed"] * 0.3
+            c["x"] -= c["speed"] * (self.game_speed / INIT_SPEED) * 0.3
         self.clouds = [c for c in self.clouds if c["x"] + 90 > 0]
         if random.random() < 0.003 and len(self.clouds) < 6:
             self.clouds.append({
@@ -655,15 +691,23 @@ class DinoEnv:
 
     def _build_state(self) -> np.ndarray:
         state = [0.0] * STATE_SIZE
-        if self.obs:
-            ob       = self.obs[0]
-            state[0] = max(0.0, ob.x - 80) / SCREEN_W
-            state[1] = (self.ground_y - ob.y - ob.h) / self.ground_y
-            state[2] = ob.w / 60.0
-            state[3] = 1.0 if ob.type_ == "bird" else 0.0
+
+        # Sort by x: smallest x = furthest right = most dangerous
+        sorted_obs = sorted(self.obs, key=lambda ob: ob.x)
+
+        for i, ob in enumerate(sorted_obs[:2]):
+            base = i * 6
+            state[base + 0] = max(0.0, ob.x - 80) / SCREEN_W
+            state[base + 1] = max(0.0, min(1.0,
+                                    (self.ground_y - ob.y - ob.h) / self.ground_y))
+            state[base + 2] = ob.w / 60.0
+            state[base + 3] = 1.0 if ob.type_ == "bird" else 0.0
             if ob.type_ == "bird":
-                state[4] = (self.ground_y - ob.y) / self.ground_y
-        state[5] = self.game_speed / MAX_SPEED
+                state[base + 4] = max(0.0, min(1.0,
+                                      (self.ground_y - ob.y) / self.ground_y))
+
+        state[5]  = self.game_speed / MAX_SPEED
+        state[11] = 0.0  # padding
         return np.array(state, dtype=np.float32)
 
     # ── Render helpers ────────────────────────────────────────
@@ -687,6 +731,14 @@ class DinoEnv:
         for ob in self.obs:
             self.screen.blit(ob.get_sprite(), (int(ob.x), int(ob.y)))
 
+    def _score_digits(self, n: int) -> list:
+        digits = []
+        while len(digits) < 5:
+            digits.append(n % 10)
+            n //= 10
+        digits.reverse()
+        return digits
+
     def _draw_scores(self, current_score: int, hi_score: int):
         hi_label = self.sprites.hi_label()
         x = SCREEN_W * 0.65
@@ -695,12 +747,12 @@ class DinoEnv:
         x += hi_label[0].get_width()
         self.screen.blit(hi_label[1], (x, y))
         x += hi_label[1].get_width() + 4
-        for d in Scoreboard(self.sprites, 0, 0)._extract_digits(hi_score):
+        for d in self._score_digits(hi_score):
             self.screen.blit(self.sprites.digit(d), (x, y))
             x += self.sprites.digit(0).get_width()
 
         x2 = SCREEN_W * 0.88
-        for d in Scoreboard(self.sprites, 0, 0)._extract_digits(current_score):
+        for d in self._score_digits(current_score):
             self.screen.blit(self.sprites.digit(d), (x2, y))
             x2 += self.sprites.digit(0).get_width()
 
@@ -715,9 +767,8 @@ class DinoEnv:
         self.screen.blit(re_sprite, (re_x, re_y))
 
     def _draw_ai_info(self, ai_info: dict):
-        font_name = pygame.font.get_default_font()
-        font  = pygame.font.SysFont(font_name, 14, bold=False)
-        small = pygame.font.SysFont(font_name, 12, bold=False)
+        font      = self._font_14
+        small     = self._font_12
 
         name       = ai_info.get("name", "AI")
         generation = ai_info.get("generation", 0)
