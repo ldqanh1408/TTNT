@@ -242,6 +242,12 @@ class Obstacle:
 
         if force_type == 'ptera':
             self._init_bird(speed, ptera_y)
+        elif force_type == 'cactus_small':
+            self._init_small_cactus(speed)
+        elif force_type == 'cactus_big':
+            self._init_big_cactus(speed)
+        elif force_type == 'cactus_double':
+            self._init_double_cactus(speed)
         elif force_type == 'cactus':
             r = random.random()
             if r < 0.6:
@@ -341,9 +347,13 @@ class Obstacle:
         return self.mask
 
     def get_rect(self) -> pygame.Rect:
-        # v2: hitbox thu nhỏ để công bằng hơn
-        margin_x = max(4, self.w // 8)
-        margin_y = max(4, self.h // 8)
+        if self.type_ == "bird":
+            # Chim có cánh trong suốt → margin lớn hơn
+            margin_x = max(6, self.w // 4)
+            margin_y = max(6, self.h // 5)
+        else:
+            margin_x = max(4, self.w // 8)
+            margin_y = max(4, self.h // 8)
         return pygame.Rect(
             self.x + margin_x,
             self.y + margin_y,
@@ -410,8 +420,10 @@ class Scoreboard:
 class DinoEnv:
     """Môi trường game hoàn chỉnh."""
 
-    def __init__(self, render: bool = False):
+    def __init__(self, render: bool = False, spawn_policy=None):
+        from shared.spawn_policy import SpawnPolicy
         self.render     = render
+        self.spawn_policy = spawn_policy or SpawnPolicy()
         self.game_speed = INIT_SPEED
         self.ground_y   = SCREEN_H - GROUND_Y_OFFSET
         self.points     = 0
@@ -570,95 +582,147 @@ class DinoEnv:
     #   • Khoảng cách tính theo pixel, không phải frame cố định
     #   • Cluster size tăng dần theo tốc độ
 
+    # ── Spawn logic ─────────────────────────────────────────
+
     def _spawn_obstacle(self):
-        # ── Điều kiện 1: chưa đủ thời gian tối thiểu ──────────
-        frames_since_spawn = self.points - self.last_spawn_frame
-        if frames_since_spawn < self.next_spawn_at:
-            return
+         frames_since_spawn = self.points - self.last_spawn_frame
+         if frames_since_spawn < self.next_spawn_at:
+             return
+         if self.obs:
+             rightmost_x = max(ob.x + ob.w for ob in self.obs)
+             if (SCREEN_W + 20) - rightmost_x < int(SCREEN_W * 0.60):
+                 return
 
-        # ── Điều kiện 2: nhóm cũ còn quá nhiều trên màn ───────
-        # Chỉ spawn khi rightmost obstacle còn cách spawn point
-        # ≥ MIN_GAP_PX → đảm bảo chỉ 1 nhóm trên màn
-        if self.obs:
-            rightmost_x = max(ob.x + ob.w for ob in self.obs)
-            min_gap_px = int(SCREEN_W * 0.60)          # 720px — đủ thoáng, không thưa
-            actual_gap = (SCREEN_W + 20) - rightmost_x
-            if actual_gap < min_gap_px:
-                return
+         kind = self.spawn_policy.decide_type(
+             self.game_speed, self.last_obstacle_type, self.points
+         )
+         if kind == "ptera":
+             self._spawn_ptera()
+         else:
+             self._spawn_cactus_cluster()
 
-        # ── Quyết định loại obstacle ────────────────────────────
-        # Chim xuất hiện từ đầu → AI học đối phó sớm
-        ptera_chance = 0.0
-        if self.last_obstacle_type != 'ptera':
-            if self.game_speed <= 8:
-                ptera_chance = 0.15
-            elif self.game_speed <= 12:
-                ptera_chance = 0.15 + (self.game_speed - 8) * 0.025
-            else:
-                ptera_chance = 0.25
+         self.last_spawn_frame = self.points
+         self.next_spawn_at    = self.spawn_policy.decide_interval(self.game_speed)
 
-        if random.random() < ptera_chance:
-            self._spawn_ptera()
-        else:
-            self._spawn_cactus_cluster()
-
-        self.last_spawn_frame = self.points
-        self.next_spawn_at    = self._spawn_interval_frames()
-
-    def _spawn_interval_frames(self) -> int:
-        if self.game_speed <= 8:
-            gap_px = random.randint(500, 800)
-        elif self.game_speed <= 12:
-            gap_px = random.randint(400, 650)
-        elif self.game_speed <= 14:
-            gap_px = random.randint(350, 550)
-        else:
-            gap_px = random.randint(300, 500)
-        return max(15, int(gap_px / self.game_speed))
+    # FIX: xóa _spawn_interval_frames — dead code, không được gọi ở đâu cả.
+    # decide_interval từ policy đã thay thế hoàn toàn.
 
     def _spawn_cactus_cluster(self):
-        if self.game_speed < 8:
-            sizes   = [1, 2]
-            weights = [70, 30]
-        elif self.game_speed < 11:
-            sizes   = [1, 2]
-            weights = [50, 50]
-        else:
-            sizes   = [1, 2, 3]
-            weights = [40, 35, 25]
+         from shared.config import JUMP_VEL, GRAVITY
 
-        cluster_size = random.choices(sizes, weights=weights)[0]
+         pattern = self.spawn_policy.decide_pattern(self.game_speed)
+         spd     = self.game_speed
+         start_x = SCREEN_W + 20
 
-        offset = 0
-        for _ in range(cluster_size):
-            obs    = Obstacle(self.game_speed, self.sprites, force_type='cactus')
-            obs.x += offset
-            offset += obs.w + random.randint(10, 25)
-            self.obs.append(obs)
+         # ── Tính jump_px: quãng đường ngang dino đi trong 1 chu kỳ nhảy ──
+         # T_jump = 2 * JUMP_VEL / GRAVITY (frames)
+         # jump_px = T_jump * spd (pixels)
+         jump_px = int((2 * JUMP_VEL / GRAVITY) * spd)
 
-        self.last_obstacle_type = 'cactus'
+         # ── FIX react_frames: GIẢM theo speed (khó hơn ở tốc độ cao) ──
+         # Trước đây: slow=2, vfast=7 → chain DỄ hơn ở tốc độ cao (ngược!)
+         # Sau fix:   slow=7, vfast=3 → chain KHÓ hơn ở tốc độ cao (đúng)
+         react_frames = self.spawn_policy.decide_chain_react_frames(spd)
+         react_px     = int(spd * react_frames)
+
+         # ── FIX chain_gap: khoảng cách giữa right edge c_n và left edge c_{n+1} ──
+         # chain_gap = jump_px + react_px
+         #   - jump_px đảm bảo c_{n+1} chưa đến khi dino còn đang nhảy qua c_n
+         #   - react_px là buffer sau khi landing → AI có react_frames frame để nhảy tiếp
+         # Trước đây: landing_gap = spd * react_frames (thiếu jump_px!)
+         #   → c2 gần như dính vào c1 → chain2 trông như 1 cactus đôi rộng
+         chain_gap = jump_px + react_px
+
+         def make_cactus(x_offset: int = 0) -> "Obstacle":
+             """
+             FIX: dùng decide_cactus_size để kích thước cactus tăng theo speed.
+             Trước đây: random 60/40 split hardcode trong Obstacle.__init__.
+             """
+             size = self.spawn_policy.decide_cactus_size(spd)
+             if size == "small":
+                 ob = Obstacle(spd, self.sprites, force_type='cactus_small')
+             elif size == "big":
+                 ob = Obstacle(spd, self.sprites, force_type='cactus_big')
+             else:  # double
+                 ob = Obstacle(spd, self.sprites, force_type='cactus_double')
+             ob.x = start_x + x_offset
+             return ob
+
+         def make_bird(x_offset: int = 0,
+                       height: str = "any") -> "Obstacle":
+             tmp = Obstacle(spd, self.sprites, force_type='ptera')
+             ground_top = SCREEN_H - GROUND_Y_OFFSET
+             tmp.y = self.spawn_policy.decide_bird_height(
+                 ground_top, tmp.h, force=height
+             )
+             tmp.x = start_x + x_offset
+             return tmp
+
+         # ── single ──────────────────────────────────────────────
+         if pattern == "single":
+             self.obs.append(make_cactus())
+
+         # ── chain2: 2 lần nhảy riêng biệt ──────────────────────
+         # gap = chain_gap (= jump_px + react_px):
+         #   → c2 chỉ đến khi dino đã landing từ c1 và có react_frames để quyết định
+         elif pattern == "chain2":
+             c1 = make_cactus(0)
+             c2 = make_cactus(c1.w + chain_gap)
+             self.obs += [c1, c2]
+
+         # ── chain3: 3 lần nhảy riêng biệt ──────────────────────
+         elif pattern == "chain3":
+             c1 = make_cactus(0)
+             c2 = make_cactus(c1.w + chain_gap)
+             c3 = make_cactus(c1.w + chain_gap + c2.w + chain_gap)
+             self.obs += [c1, c2, c3]
+
+         # ── jump_duck: nhảy qua cactus → cúi né chim ───────────
+         # Chim đặt cách c1 ≥ jump_px để dino đã landing trước khi chim đến.
+         # Dino đứng → chim đâm; Dino cúi → chim bay qua.
+         elif pattern == "jump_duck":
+             c1          = make_cactus(0)
+             # Thêm buffer nhỏ sau jump_px để dino có thời gian unduck (nếu đang bay)
+             gap_to_bird = jump_px + random.randint(15, 45)
+             # "mid" hoặc "high" → dino cúi mới qua được
+             bird_height = random.choice(["mid", "high"])
+             b1          = make_bird(c1.w + gap_to_bird, height=bird_height)
+             self.obs   += [c1, b1]
+
+         # ── duck_jump: cúi né chim → nhảy cactus ───────────────
+         # Chim "high" → chạm đầu dino đứng → buộc phải cúi.
+         # Sau chim đủ thời gian unduck + react → mới đến cactus.
+         elif pattern == "duck_jump":
+             b1 = make_bird(0, height="high")
+             # Cần unduck (~ 2-3 frame) + react_frames trước khi nhảy
+             unduck_frames = 3
+             gap_to_cactus = int(spd * (unduck_frames + react_frames + 5))
+             c1            = make_cactus(b1.w + gap_to_cactus)
+             self.obs     += [b1, c1]
+
+         # ── sandwich: cactus → chim → cactus (nhảy, cúi, nhảy) ─
+         elif pattern == "sandwich":
+             c1            = make_cactus(0)
+             gap_to_bird   = jump_px + random.randint(10, 30)
+             bird_height   = random.choice(["mid", "high"])
+             b1            = make_bird(c1.w + gap_to_bird, height=bird_height)
+             # Cactus cuối: sau chim, dino cần unduck + react frames
+             unduck_frames = 3
+             gap_to_c2     = int(spd * (unduck_frames + react_frames + 5))
+             x_c2          = c1.w + gap_to_bird + b1.w + gap_to_c2
+             c2            = make_cactus(x_c2)
+             self.obs     += [c1, b1, c2]
+
+         self.last_obstacle_type = 'cactus'
 
     def _spawn_ptera(self):
-        # Chrome Dino gốc: 3 độ cao (sát đất / giữa / cao)
-        # "sát đất" → phải nhảy; "giữa" → có thể duck hoặc nhảy; "cao" → duck thẳng
-        ground_top = SCREEN_H - GROUND_Y_OFFSET
-
-        # Lấy kích thước ptera từ sprite (đã scale)
-        tmp = Obstacle(self.game_speed, self.sprites, force_type='ptera')
-        ph  = tmp.h   # chiều cao bird sau scale
-
-        heights = {
-            'low':  ground_top - ph - 10,    # sát đất (cần nhảy)
-            'mid':  ground_top - ph - 55,    # giữa
-            'high': ground_top - ph - 110,   # cao (duck được)
-        }
-        choice  = random.choices(['low', 'mid', 'high'], weights=[30, 45, 25])[0]
-        ptera_y = heights[choice]
-
-        obs = Obstacle(self.game_speed, self.sprites,
-                       force_type='ptera', ptera_y=ptera_y)
-        self.obs.append(obs)
-        self.last_obstacle_type = 'ptera'
+         tmp        = Obstacle(self.game_speed, self.sprites, force_type='ptera')
+         ground_top = SCREEN_H - GROUND_Y_OFFSET
+         ptera_y    = self.spawn_policy.decide_bird_height(ground_top, tmp.h)
+         obs        = Obstacle(self.game_speed, self.sprites,
+                               force_type='ptera', ptera_y=ptera_y)
+         self.obs.append(obs)
+         self.last_obstacle_type = 'ptera'
 
     def _update_obstacles(self):
         for ob in self.obs:
@@ -686,70 +750,45 @@ class DinoEnv:
     # ── State vector ──────────────────────────────────────────
 
     def _build_state(self, dino: "Dinosaur | None" = None) -> np.ndarray:
-        state = [0.0] * STATE_SIZE  # STATE_SIZE = 13
+        state = [0.0] * STATE_SIZE  # 13
 
         sorted_obs = sorted(self.obs, key=lambda ob: ob.x)
         ref_x = dino.x if dino else 80
 
-        if sorted_obs:
-            first = sorted_obs[0]
-            cluster_x = first.x
-            cluster_right = first.x + first.w
-            max_h = first.h
-            has_bird = first.type_ == "bird"
-            bird_y = first.y if has_bird else 0.0
-            bird_x = first.x if has_bird else 0.0
-            bird_high = 0.0
-
-            if has_bird and self.ground_y - first.y - first.h > 80:
-                bird_high = 1.0
-
-            for ob in sorted_obs[1:]:
-                if ob.x - cluster_right <= 100:
-                    cluster_right = ob.x + ob.w
-                    max_h = max(max_h, ob.h)
-                    if ob.type_ == "bird":
-                        has_bird = True
-                        bird_y = ob.y
-                        bird_x = ob.x
-                        if self.ground_y - ob.y - ob.h > 80:
-                            bird_high = 1.0
-                else:
-                    break
-
-            dist_px = cluster_x - ref_x
-            state[0] = max(0.0, min(1.0, dist_px / SCREEN_W))
-            state[1] = min(1.0, (cluster_right - cluster_x) / 200.0)
-            state[2] = min(1.0, max_h / 120.0)
-            state[3] = 1.0 if has_bird else 0.0
-            state[4] = bird_y / max(self.ground_y, 1) if has_bird else 0.0
-            state[5] = bird_x / SCREEN_W if has_bird else 0.0
-
-            # [6] Jump safety
-            if self.game_speed > 0.1:
-                jump_duration = 2 * JUMP_VEL / GRAVITY
-                max_jump_h   = JUMP_VEL**2 / (2 * GRAVITY)
-                if max_h < max_jump_h:
-                    time_to_obs = dist_px / self.game_speed
-                    jump_ok = max(0.0, min(1.0, (jump_duration - time_to_obs) / jump_duration))
-                else:
-                    jump_ok = 0.0
-            else:
-                jump_ok = 0.0
-            state[6] = jump_ok
-
-            # [7] bird_high — tín hiệu tường minh: nên cúi
-            state[7] = bird_high
+        # [0-3] + [4-7] 2 obstacles: dist, height, is_bird, bird_y
+        for i in range(2):
+            if i < len(sorted_obs):
+                ob = sorted_obs[i]
+                base = i * 4
+                dist_px = ob.x - ref_x
+                state[base + 0] = max(0.0, min(1.0, dist_px / SCREEN_W))
+                state[base + 1] = min(1.0, ob.h / 160.0)
+                state[base + 2] = 1.0 if ob.type_ == "bird" else 0.0
+                state[base + 3] = ob.y / max(self.ground_y, 1) if ob.type_ == "bird" else 0.0
 
         # [8] Tốc độ
         state[8] = self.game_speed / MAX_SPEED
 
-        # [9-12] Dino state
+        # [9-10] Dino state
         if dino is not None:
-            state[9] = dino.y / max(self.ground_y, 1)
-            state[10] = dino._vel_y / max(dino.jump_vel, 1)
-            state[11] = 1.0 if dino.is_jumping else 0.0
-            state[12] = 1.0 if dino.is_ducking else 0.0
+            state[9] = 1.0 if dino.is_jumping else 0.0
+            state[10] = 1.0 if dino.is_ducking else 0.0
+
+        # [11] Jump safety cho obs1
+        if len(sorted_obs) >= 1 and self.game_speed > 0.1:
+            ob1 = sorted_obs[0]
+            dist_px = ob1.x - ref_x
+            jump_dur = 2 * JUMP_VEL / GRAVITY
+            max_jump = JUMP_VEL**2 / (2 * GRAVITY)
+            if ob1.h < max_jump:
+                t = dist_px / self.game_speed
+                state[11] = max(0.0, min(1.0, (jump_dur - t) / jump_dur))
+
+        # [12] Dino vertical velocity (âm = đang bay lên, dương = đang rơi)
+        if dino is not None and dino.is_jumping:
+            state[12] = dino._vel_y / JUMP_VEL
+        else:
+            state[12] = 0.0
 
         return np.array(state, dtype=np.float32)
 

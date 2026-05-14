@@ -1,0 +1,172 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1778775891203,
+  "projectRoot": "C:\\Users\\CYBORG\\PycharmProjects\\PythonProject",
+  "techStack": {
+    "languages": [
+      {
+        "name": "Python",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "requirements.txt"
+        ]
+      }
+    ],
+    "frameworks": [],
+    "packageManager": "pip",
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": null,
+    "testCommand": null,
+    "lintCommand": null,
+    "devCommand": null,
+    "scripts": {}
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [],
+    "gitBranches": null
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "dqn": {
+      "path": "dqn",
+      "purpose": null,
+      "fileCount": 3,
+      "lastAccessed": 1778775891162,
+      "keyFiles": [
+        "dqn_ai.py",
+        "README.md",
+        "train_dqn.py"
+      ]
+    },
+    "model": {
+      "path": "model",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1778775891163,
+      "keyFiles": [
+        "dqn_best.pkl"
+      ]
+    },
+    "shared": {
+      "path": "shared",
+      "purpose": null,
+      "fileCount": 8,
+      "lastAccessed": 1778775891163,
+      "keyFiles": [
+        "base_ai.py",
+        "config.py",
+        "evaluator.py",
+        "game_env.py",
+        "main.py"
+      ]
+    },
+    "templates": {
+      "path": "templates",
+      "purpose": null,
+      "fileCount": 18,
+      "lastAccessed": 1778775891164,
+      "keyFiles": [
+        "cacti-big.png",
+        "cacti-small.png",
+        "checkPoint.wav",
+        "cloud.png",
+        "die.wav"
+      ]
+    },
+    "__pycache__": {
+      "path": "__pycache__",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1778775891165,
+      "keyFiles": [
+        "template_ai.cpython-314.pyc"
+      ]
+    }
+  },
+  "hotPaths": [
+    {
+      "path": "dqn\\dqn_ai.py",
+      "accessCount": 9,
+      "lastAccessed": 1778777359362,
+      "type": "file"
+    },
+    {
+      "path": "shared\\spawn_policy.py",
+      "accessCount": 8,
+      "lastAccessed": 1778777271893,
+      "type": "file"
+    },
+    {
+      "path": "dqn\\README.md",
+      "accessCount": 7,
+      "lastAccessed": 1778778841973,
+      "type": "file"
+    },
+    {
+      "path": "",
+      "accessCount": 5,
+      "lastAccessed": 1778777130263,
+      "type": "directory"
+    },
+    {
+      "path": "shared\\game_env.py",
+      "accessCount": 5,
+      "lastAccessed": 1778778712712,
+      "type": "file"
+    },
+    {
+      "path": "shared\\config.py",
+      "accessCount": 3,
+      "lastAccessed": 1778777015385,
+      "type": "file"
+    },
+    {
+      "path": "dqn\\train_dqn.py",
+      "accessCount": 2,
+      "lastAccessed": 1778777121803,
+      "type": "file"
+    },
+    {
+      "path": "shared\\base_ai.py",
+      "accessCount": 1,
+      "lastAccessed": 1778776253595,
+      "type": "file"
+    },
+    {
+      "path": "shared\\evaluator.py",
+      "accessCount": 1,
+      "lastAccessed": 1778776253834,
+      "type": "file"
+    },
+    {
+      "path": "shared\\renderer.py",
+      "accessCount": 1,
+      "lastAccessed": 1778776261193,
+      "type": "file"
+    },
+    {
+      "path": "dqn\\model\\training_curve.png",
+      "accessCount": 1,
+      "lastAccessed": 1778776295645,
+      "type": "file"
+    },
+    {
+      "path": "template_ai.py",
+      "accessCount": 1,
+      "lastAccessed": 1778777121789,
+      "type": "file"
+    }
+  ],
+  "userDirectives": []
+}

@@ -59,8 +59,8 @@ JUMP_VEL = 18.5    # px/frame  — clearance ~148px
 
 # ─── Tốc độ game ──────────────────────────────────────────
 INIT_SPEED      = 6.0
-SPEED_INCREMENT = 0.005
-MAX_SPEED       = 16.0
+SPEED_INCREMENT = 0.008   # nhanh hơn → ép AI thích nghi
+MAX_SPEED       = 32.0
 
 # ─── Chướng ngại vật (kích thước tham khảo – sau scale) ───
 # Giá trị này chỉ dùng để tham khảo / fallback; kích thước thật
@@ -74,16 +74,14 @@ BIRD_W = 64   # sau BIRD_SCALE=0.70
 BIRD_H = 56
 
 # ─── State / Action ───────────────────────────────────────
-# 13D: 1 cụm obstacle × 5 + bird_x + jump_safety + bird_high + speed + 4 dino state
-#   [0-4]   cụm: dist, total_width, max_height, has_bird, bird_y
-#   [5]     bird_x / SCREEN_W
-#   [6]     jump_safety
-#   [7]     bird_high: 1.0 nếu chim cao (nên cúi), 0 nếu ko
+# 13D: 2 obstacles × 4 + speed + 2 dino + jump_safety + vel_y
+#   [0-3]   obs1: dist, height, is_bird, bird_y
+#   [4-7]   obs2: dist, height, is_bird, bird_y
 #   [8]     game_speed / MAX_SPEED
-#   [9]     dino_y / ground_y
-#   [10]    dino_vel_y / jump_vel
-#   [11]    is_jumping (0/1)
-#   [12]    is_ducking (0/1)
+#   [9]     is_jumping (0/1)
+#   [10]    is_ducking (0/1)
+#   [11]    jump_safety (obs1)
+#   [12]    dino.vel_y / JUMP_VEL (âm=lên, dương=xuống, 0 nếu ko nhảy)
 STATE_SIZE  = 13
 ACTION_SIZE = 3
 
