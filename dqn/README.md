@@ -1,423 +1,168 @@
-# DQN – Deep Q-Network cho Chrome Dino
+# DQN Dino AI — Cấu hình & Thiết kế
 
-Triển khai thuật toán **Double DQN with Experience Replay** để điều khiển AI chơi Chrome Dino. Mục tiêu: tối đa hoá điểm số bằng cách học chính sách nhảy/cúi/chạy tối ưu.
+Deep Q-Network điều khiển Chrome Dino tự động né chướng ngại vật.
 
----
+## 1. State Vector (12D)
 
-## Mục lục
+Mỗi frame, AI nhận vector 12 chiều mô tả trạng thái game:
 
-1. [Cấu trúc file](#1-cấu-trúc-file)
-2. [Kiến trúc mạng](#2-kiến-trúc-mạng)
-3. [State vector (12 chiều)](#3-state-vector-12-chiều)
-4. [Thuật toán](#4-thuật-toán)
-5. [Reward shaping](#5-reward-shaping)
-6. [Cấu hình](#6-cấu-hình)
-7. [Cách sử dụng](#7-cách-sử-dụng)
-8. [Huấn luyện trên Colab / Kaggle](#8-huấn-luyện-trên-colab--kaggle)
-9. [Load model vào code](#9-load-model-vào-code)
-10. [Giải thích các thành phần](#10-giải-thích-các-thành-phần)
-11. [Troubleshooting](#11-troubleshooting)
-
----
-
-## 1. Cấu trúc file
-
-| File | Mô tả |
-|---|---|
-| `dqn_ai.py` | Triển khai DQN: mạng nơ-ron, replay buffer, vòng lặp train |
-| `train_dqn.py` | Script huấn luyện, đánh giá, xem AI chơi |
-| `colab_train.ipynb` | Notebook Google Colab / Kaggle (GPU miễn phí) |
-| `models/` | Thư mục lưu checkpoint (`dqn_best.pkl`) |
-
----
-
-## 2. Kiến trúc mạng
-
-```
-Input (12 chiều)
-  ├── Obstacle 1: [dist, height, width, is_bird, bird_height]
-  ├── Obstacle 2: [dist, height, width, is_bird, bird_height]
-  └── speed_ratio
-        │
-        ▼
-  Linear(12 → 128) → ReLU()
-  Linear(128 → 128) → ReLU()
-  Linear(128 → 3)             ← Q(s,0), Q(s,1), Q(s,2)
-```
-
-Output: 3 Q-value — chọn action có Q-value cao nhất.
-
-**Activation function:**
-
-| Layer | Activation | Lý do |
-|---|---|---|
-| Hidden 1-2 | ReLU | Tránh vanishing gradient, tính nhanh |
-| Output | Tuyến tính | Q-value có thể âm (dùng MSE loss) |
-
----
-
-## 3. State vector (12 chiều)
-
-```
-Index  Feature          Mô tả                           Normalize
-────────────────────────────────────────────────────────────────
-[0]    dist_to_obs1     Khoảng cách đến vật gần nhất    ÷ SCREEN_W
-[1]    obs_height1      Độ cao đáy vật thứ 1            ÷ ground_y
-[2]    obs_width1       Chiều rộng vật thứ 1            ÷ 60
-[3]    is_bird1         1.0 nếu là chim, 0.0 nếu cactus ÷ 1
-[4]    bird_height1     Độ cao đỉnh chim (chỉ khi bird)  ÷ ground_y
-[5]    speed_ratio      game_speed / MAX_SPEED            ÷ 1
-[6-10] (obstacle 2)    Lặp lại 5 features cho vật thứ 2
-[11]   (padding)       Luôn = 0.0
-```
-
-**Lưu ý:**
-- Obstacles được **sort theo x** (nhỏ nhất = xa nhất = nguy hiểm nhất) trước khi điền vào state
-- Nếu chỉ có 1 obstacle, obstacle thứ 2 = vector 0
-- `dist` lấy `max(0, ob.x - 80)` — offset 80px để dino có phản ứng sớm hơn
-- `is_bird=1` thì `bird_height` được set, ngược lại = 0
-- Tất cả clip vào `[0, 1]` để tránh giá trị ngoài range
-
-**Action:**
-
-| Value | Action | Dùng khi |
-|---|---|---|
-| `0` | Cúi (duck) | Bird bay thấp, cactus thấp |
-| `1` | Nhảy (jump) | Cactus cao, bird bay cao |
-| `2` | Chạy (run) | Giữ nguyên tư thế, tốc độ ổn định |
-
----
-
-## 4. Thuật toán
-
-### Double DQN
-Dùng **online network** chọn action ở next state, **target network** ước lượng giá trị. Giảm overestimation bias.
-
-```
-target_Q = r + γ * Q_target(s', argmax_a Q_online(s', a)) * (1 - done)
-```
-
-### Experience Replay
-Lưu transition `(state, action, reward, next_state, done)` vào deque 50.000. Mỗi bước học lấy ngẫu nhiên 64 mẫu — phá vỡ temporal correlation.
-
-### Soft Update
-Target network cập nhật mềm mỗi bước:
-```
-θ_target ← τ * θ_online + (1 - τ) * θ_target
-```
-`τ = 0.005`. Ổn định hơn hard update (copy cứng sau N bước).
-
-### Epsilon-Greedy
-```
-ε = max(0.05, ε × 0.995)
-```
-Bắt đầu 1.0, về ~0.05 sau ~600 episodes. Exploration giảm dần để exploitation tăng dần.
-
-### Gradient Clipping
-`max_norm = 1.0` ngăn gradient explode — đặc biệt quan trọng khi reward shaping tạo gradient lớn.
-
----
-
-## 5. Reward shaping
-
-Reward được tính lại trước khi lưu vào buffer:
-
-```
-if done:          shaped_reward = -10.0
-elif reward > 0:  shaped_reward = 1.0 + game_speed × 0.05
-else:             shaped_reward = 0.0
-```
-
-| Trường hợp | Reward gốc | Shaped | Giải thích |
+| Index | Tên | Công thức | Ý nghĩa |
 |---|---|---|---|
-| Chết | -50 | **-10** | Giảm tỉ lệ âm: 50:1 → 5:1 |
-| Sống + speed cao | +1 | **1.0–1.8** | Thưởng tốc độ cao (sống lâu hơn) |
-| Sống + speed thấp | +1 | **1.0–1.1** | Ít thưởng hơn |
-| Vượt qua obstacle | +10 | **+10** | Thưởng từ env |
+| 0 | **dist** | `(cluster_x - dino.x) / 1200` | Khoảng cách đến cụm vật cản (0=sát mặt, 1=xa) |
+| 1 | **width** | `cluster_width / 200` | Tổng độ rộng cụm (các vật cách nhau ≤100px gộp lại) |
+| 2 | **max_h** | `max_height / 120` | Chiều cao cây cao nhất trong cụm |
+| 3 | **has_bird** | `0` hoặc `1` | Có chim trong cụm không? |
+| 4 | **bird_y** | `bird.y / ground_y` | Vị trí dọc của chim (0 nếu không có chim) |
+| 5 | **bird_x** | `bird.x / 1200` | Tọa độ x của chim (0 nếu không có chim) |
+| 6 | **jump_safety** | `(34 - dist/speed) / 34` | Nhảy bây giờ có clear được không? (1=an toàn, 0=chưa nên) |
+| 7 | **speed** | `game_speed / 16` | Tốc độ game hiện tại |
+| 8 | **dino_y** | `dino.y / ground_y` | Vị trí dọc của dino |
+| 9 | **dino_vel** | `dino.vel_y / 18.5` | Vận tốc dọc (âm=lên, dương=xuống) |
+| 10 | **is_jumping** | `0` hoặc `1` | Dino đang nhảy? |
+| 11 | **is_ducking** | `0` hoặc `1` | Dino đang cúi? |
 
-**Tại sao -10 thay vì -50?**
-- `-50` tạo gradient quá mạnh → mạng sợ chết quá mức, trở nên bảo thủ
-- `-10` vẫa đủ để phân biệt chết vs sống, không làm gradient dominate
+### Cụm obstacle (cluster)
 
----
+Các obstacle cách nhau ≤ 100px được gộp thành 1 cụm. State lấy:
+- **dist**: khoảng cách đến vật ĐẦU TIÊN trong cụm
+- **width**: tổng độ rộng từ vật đầu đến vật cuối
+- **max_h**: chiều cao vật CAO NHẤT trong cụm
+- **has_bird / bird_x / bird_y**: thông tin chim nếu có trong cụm
 
-## 6. Cấu hình
+```
+Ví dụ: [xương rồng x=400 h=35] [xương rồng x=440 h=70]
+→ cụm: dist=400/1200, width=74/200, max_h=70/120, has_bird=0
+```
 
-Chỉnh trong `dqn_ai.py`, dict `DQN_CONFIG`:
+### Jump Safety
 
-### Kiến trúc mạng
+Dựa trên vật lý nhảy: `jump_duration = 2 × 18.5 / 1.1 ≈ 34 frames`
 
-| Tham số | Mặc định | Ý nghĩa |
+```
+jump_safety = (34 - distance/speed) / 34   (clip 0→1)
+
+  dist=600, speed=10 → time=60 → safety=0.0  (quá xa, chưa nhảy)
+  dist=300, speed=10 → time=30 → safety=0.12 (có thể nhảy)
+  dist=170, speed=10 → time=17 → safety=0.5  (thời điểm lý tưởng)
+  dist=50,  speed=10 → time=5  → safety=0.85 (hơi trễ)
+```
+
+Nếu `max_h > 148px` → vật quá cao, jump_safety = 0.
+
+## 2. Action Space (3 actions)
+
+| Action | Hành động |
+|---|---|
+| 0 | **DUCK** — cúi xuống |
+| 1 | **JUMP** — nhảy lên |
+| 2 | **RUN** — chạy thẳng |
+
+## 3. Reward Function
+
+| Sự kiện | Reward | Ghi chú |
 |---|---|---|
-| `hidden_sizes` | `[128, 128]` | 2 lớp ẩn, mỗi lớp 128 neurons |
-| `state_size` | `12` | Kích thước state vector |
-| `action_size` | `3` | 3 actions: duck, jump, run |
+| **Chết** | `-1.0` | Va chạm vật cản |
+| **Sống** | `+0.1` / frame | Khuyến khích sống lâu |
+| **Vượt xương rồng** | `+10.0` | Nhảy qua cactus |
+| **Vượt chim thấp** (<40px ground) | `+25.0` | Phải nhảy, không còn cách khác |
+| **Vượt chim giữa** (40-80px) | `+15.0` | Có thể nhảy hoặc cúi |
+| **Vượt chim cao** (>80px) + cúi | `+30.0` | Hành động tối ưu: cúi né |
+| **Vượt chim cao** (>80px) + nhảy | `+5.0` | Vẫn được nhưng ít điểm |
 
-### Replay buffer
+## 4. Network Architecture
 
-| Tham số | Mặc định | Ý nghĩa |
+```
+Input(12) → Linear(128) → ReLU → Linear(64) → ReLU → Linear(3)
+```
+
+~10,000 tham số. Double DQN với soft target update.
+
+## 5. Hyperparameters
+
+### Training
+
+| Param | Value | Giải thích |
 |---|---|---|
-| `buffer_capacity` | `50_000` | Số transition tối đa lưu trong buffer |
-| `batch_size` | `64` | Số mẫu mỗi lần học |
+| `lr` | `5e-5` | Learning rate thấp → hội tụ ổn định, tránh catastrophic forgetting |
+| `gamma` | `0.995` | Discount cao → ưu tiên sống lâu dài |
+| `tau` | `0.02` | Soft update chậm → target network ổn định |
+| `batch_size` | `256` | Batch lớn → gradient ổn định |
+| `buffer_capacity` | `200_000` | Chứa ~600 episodes gần nhất, rác cũ bị đẩy ra |
+| `learn_start` | `5_000` | Đợi đủ experience trước khi bắt đầu học |
+| `learn_every` | `2` | Học mỗi 2 steps |
+| `grad_clip` | `1.0` | Gradient clipping |
+| `loss` | SmoothL1Loss | Huber loss — ổn định với outlier |
 
-### Học tập
+### Exploration
 
-| Tham số | Mặc định | Ý nghĩa |
+| Param | Value | Giải thích |
 |---|---|---|
-| `lr` | `1e-3` | Learning rate — tốc độ cập nhật weights |
-| `gamma` | `0.97` | Discount factor — mức độ ưu tiên reward tương lai |
-| `tau` | `0.005` | Soft-update coefficient — tốc độ cập nhật target network |
-| `learn_start` | `1_000` | Bắt đầu học sau N transitions (đợi buffer đầy đủ) |
-| `learn_every` | `4` | Học sau mỗi N bước (tiết kiệm compute) |
+| `eps_start` | `1.0` | 100% exploration lúc đầu |
+| `eps_decay` | `0.997` | Giảm dần, về eps_end sau ~1300 episodes |
+| `eps_end` | `0.02` | 2% exploration vĩnh viễn |
 
-### Epsilon-greedy
+## 6. Game Physics
 
-| Tham số | Mặc định | Ý nghĩa |
+| Hằng số | Value | Ý nghĩa |
 |---|---|---|
-| `eps_start` | `1.0` | Epsilon ban đầu — 100% random |
-| `eps_end` | `0.05` | Epsilon tối thiểu — 5% random, 95% greedy |
-| `eps_decay` | `0.995` | Decay rate — về `eps_end` sau ~600 episodes |
+| `SCREEN_W` | 1200 | Chiều rộng màn hình |
+| `SCREEN_H` | 450 | Chiều cao màn hình |
+| `FPS` | 60 | Khung hình/giây |
+| `GRAVITY` | 1.1 px/frame² | Trọng lực |
+| `JUMP_VEL` | 18.5 px/frame | Vận tốc nhảy ban đầu |
+| `INIT_SPEED` | 6.0 | Tốc độ game ban đầu |
+| `SPEED_INCREMENT` | 0.005 / frame | Tốc độ tăng dần |
+| `MAX_SPEED` | 16.0 | Tốc độ tối đa |
+| `DINO_SCALE` | 0.45 | Tỉ lệ thu nhỏ dino |
+| `OBSTACLE_SCALE` | 0.80 | Tỉ lệ thu nhỏ xương rồng |
+| `BIRD_SCALE` | 0.70 | Tỉ lệ thu nhỏ chim |
 
-### Target network
-
-| Tham số | Mặc định | Ý nghĩa |
-|---|---|---|
-| `use_soft_update` | `True` | Soft update mỗi bước (bật = ổn định hơn) |
-| `target_update_freq` | `200` | Tần suất hard update (chỉ dùng khi soft_update=False) |
-
-### Hướng dẫn tuning
-
-```
-Muốn AI học CHẬM hơn nhưng ổn định:  giảm lr (1e-4), tăng tau (0.01)
-Muốn AI học NHANH hơn:                tăng lr (2e-3), giảm eps_decay (0.990)
-Muốn AI thăm dò nhiều hơn:           giảm eps_end (0.01), giảm eps_decay (0.990)
-Muốn AI chơi an toàn:                tăng gamma (0.99), giảm lr (5e-4)
-Muốn AI chơi tấn công:              giảm gamma (0.95), tăng lr (2e-3)
-```
-
----
-
-## 7. Cách sử dụng
-
-### Huấn luyện từ đầu
-
-```bash
-python dqn/train_dqn.py
-```
-
-Mặc định: 800 episodes, tự động lưu checkpoint tốt nhất vào `model/dqn_best.pkl`.
-
-### Tăng số episodes
-
-Sửa `train_dqn.py`, hàm `train_from_scratch()`:
-
-```python
-scores = ai.train(
-    n_episodes       = 2000,   # ← tăng ở đây
-    max_steps_per_ep = 10_000,  # ← tăng nếu muốn episode dài hơn
-    ...
-)
-```
-
-### Tiếp tục train từ checkpoint
-
-```bash
-python dqn/train_dqn.py --resume
-```
-
-Model đã train 800 ep có thể train tiếp thêm 400 ep để cải thiện.
-
-### Xem AI đã train chơi
-
-```bash
-python dqn/train_dqn.py --watch
-```
-
-Cần có `model/dqn_best.pkl`. Đặt `epsilon=0` để AI luôn chọn action tốt nhất.
-
-### Chỉ đánh giá (không render)
-
-```bash
-python dqn/train_dqn.py --eval
-```
-
-Chạy 20 lần, in mean/max/min/std score.
-
----
-
-## 8. Huấn luyện trên Colab / Kaggle
-
-GPU miễn phí, không cần cài đặt local.
-
-### Google Colab
-
-1. Mở `colab_train.ipynb` trên Google Colab
-2. **Runtime > Change runtime type > GPU (T4)**
-3. Upload 3 folder `shared/`, `dqn/`, `templates/` vào panel bên trái (kéo thả)
-4. Mount Google Drive (model tự lưu vào Drive, không mất khi Colab reset)
-5. **Runtime > Run all**
-
-### Kaggle
-
-1. Tạo dataset từ 3 folder trên Kaggle
-2. Tạo notebook mới → **Add Data** → gắn dataset
-3. Enable GPU: panel bên phải → **Settings > Accelerator > GPU T4**
-4. Copy nội dung `colab_train.ipynb` (bỏ bước mount Drive)
-5. Đổi đường dẫn `/content/` thành `/kaggle/working/`
-
-### So sánh
-
-| | Colab | Kaggle |
-|---|---|---|
-| GPU | T4 (free, 8h/phiên) | T4 (free, 30h/tuần) |
-| Lưu model | Google Drive | Download thủ công |
-| Setup | Upload files tay | Gắn dataset dễ hơn |
-
----
-
-## 9. Load model vào code
-
-```python
-from dqn.dqn_ai import DQNDinoAI
-
-ai = DQNDinoAI()
-ai.load_model("model/dqn_best.pkl")
-ai.epsilon = 0.0   # greedy — luôn chọn action tốt nhất
-
-# Lấy action từ state (np.ndarray 12 chiều)
-action = ai.predict(state)   # trả về 0, 1, hoặc 2
-```
-
-**Lưu ý:** Model train với `state_size=12`. Dùng model cũ train với `state_size=6` sẽ crash vì kích thước layer không khớp.
-
----
-
-## 10. Giải thích các thành phần
-
-### Tại sao dùng ReLU ở hidden layers?
-
-1. **Tính toán nhanh** — chỉ 1 phép so sánh `max(0, x)`. Không có exp/log như sigmoid/tanh.
-2. **Giảm vanishing gradient** — ReLU có gradient = 1 khi x > 0, không suy giảm khi lan ngược nhiều layers.
-3. **Sparse activation** — ~50% neurons die khi input ngẫu nhiên → mỗi neuron học features khác nhau, tăng tổng quát hoá.
-
-### Tại sao output layer dùng linear (không ReLU)?
-
-Q-value có thể âm (action chọn sai gây thất bại). ReLU clip về 0 → không thể represent negative Q-values → mất thông tin.
-
-### Tại sao dùng Double DQN?
-
-DQN thường overestimate Q-values vì cùng một mạng vừa chọn vừa đánh giá action. Double DQN dùng 2 mạng riêng biệt (online + target) để giảm bias này.
-
-### Tại sao Experience Replay?
-
-Các transition liên tiếp có correlation cao (state t+1 gần state t). Nếu học theo thứ tự, mạng có thể overfit vào một region nhất định. Replay shuffle giữa các transition để mạng học đều từ mọi phần của không gian state.
-
-### Tại sao clip gradient?
-
-Gradient clipping `max_norm=1.0` ngăn gradient explode (bùng nổ) khi reward shaping tạo signal mạnh bất thường. Đặc biệt quan trọng với `-10` death penalty và `+10` pass reward.
-
----
-
-## 11. Troubleshooting
-
-### Crash ngay khi chạy
+### Công thức nhảy
 
 ```
-ModuleNotFoundError: No module named 'torch'
-```
-```bash
-pip install pygame numpy torch matplotlib pillow
+Thời gian nhảy:    T = 2 × JUMP_VEL / GRAVITY = 2 × 18.5 / 1.1 ≈ 34 frames (0.57s)
+Độ cao tối đa:     H = JUMP_VEL² / (2 × GRAVITY) = 18.5² / 2.2 ≈ 155 px
 ```
 
-### State size mismatch
+## 7. Spawn Logic
+
+### Xương rồng
+
+| Tốc độ | Cluster size |
+|---|---|
+| < 8 | 1-2 cây (70% 1 cây) |
+| 8-11 | 1-2 cây (50% 2 cây) |
+| > 11 | 1-3 cây |
+
+### Chim (Ptera)
+
+| Tốc độ | Tỉ lệ spawn |
+|---|---|
+| ≤ 8 | 15% |
+| 8-12 | 15-25% |
+| > 12 | 25% |
+
+Chim không spawn 2 lần liên tiếp. Có 3 độ cao: sát đất (phải nhảy), giữa, cao (nên cúi).
+
+## 8. Sơ đồ hoạt động
 
 ```
-RuntimeError: size mismatch
-```
-Model checkpoint cũ train với `state_size=6` không tương thích với code mới (`state_size=12`). Xoá checkpoint cũ và train lại:
-
-```bash
-del models\dqn_best.pkl
-python dqn/train_dqn.py
-```
-
-### GPU không được dùng
-
-Kiểm tra device trong log khởi tạo:
-```
-[DQN-Dino] Khởi tạo xong. Device: cuda   ← GPU đang dùng
-[DQN-Dino] Khởi tạo xong. Device: cpu    ← GPU không khả dụng
-```
-
-Thử:
-```python
-import torch
-print(torch.cuda.is_available())  # True = GPU khả dụng
-```
-
-### Loss = NaN
-
-Thường do:
-1. **Gradient explode** → tăng `clip_grad_norm` lên 0.5 hoặc giảm `lr`
-2. **State có giá trị Inf/NaN** → kiểm tra `_build_state()` có clip đúng
-3. **Reward quá lớn** → giảm pass reward từ 10 xuống 5
-
-### AI không học (score = 0 sau 500 episodes)
-
-1. `eps_decay` quá chậm → thử `0.990` thay vì `0.995`
-2. `lr` quá thấp → thử `2e-3`
-3. `gamma` quá thấp → thử `0.99`
-4. Buffer chưa đầy → tăng `learn_start` và đợi
-
-### AI chỉ nhảy hoặc chỉ cúi
-
-1. Epsilon chưa giảm đủ → train thêm episodes
-2. Reward shaping chưa tốt → thử tăng pass reward
-3. State không đủ thông tin → kiểm tra `is_bird` feature có đúng
-
----
-
-## Minh hoạ thuật toán (pseudo-code)
-
-```
-Initialize Q_online(s, a) và Q_target(s, a) = Q_online
-Initialize replay buffer R (capacity = 50,000)
-
-FOR episode = 1 to n_episodes:
-    state = env.reset()
-    FOR step = 1 to max_steps:
-        # Epsilon-greedy
-        IF random() < epsilon:
-            action = random(0, 1, 2)
-        ELSE:
-            action = argmax_a Q_online(state, a)
-
-        next_state, reward, done, info = env.step(action)
-
-        # Reward shaping
-        IF done:     shaped = -10
-        ELSE IF reward > 0: shaped = 1 + speed * 0.05
-        ELSE:         shaped = 0
-
-        R.push(state, action, shaped, next_state, done)
-        state = next_state
-
-        # Học mỗi learn_every bước
-        IF step % learn_every == 0 AND len(R) >= learn_start:
-            batch = R.sample(batch_size)
-
-            # Double DQN
-            best_a = argmax_a Q_online(next_state, a)
-            target = reward + gamma * Q_target(next_state, best_a) * (1 - done)
-
-            loss = MSE(Q_online(state, action), target)
-            optimize Q_online with gradient descent
-            gradient_clip(1.0)
-
-            # Soft update target network
-            Q_target = tau * Q_online + (1 - tau) * Q_target
-
-        IF done: BREAK
-
-    epsilon = max(eps_end, epsilon * eps_decay)
+┌──────────┐    state(12)     ┌──────────────┐    action(3)    ┌──────────┐
+│   GAME   │ ───────────────► │   Q-NETWORK  │ ──────────────► │   DINO   │
+│   ENV    │                  │  12→128→64→3 │                 │  JUMP/   │
+│          │ ◄────────────────│              │                 │  DUCK/RUN│
+└──────────┘   (s,a,r,s',done)└──────────────┘                 └──────────┘
+      │                              ▲
+      │         ┌──────────┐         │
+      └────────►│ REPLAY   │─────────┘
+                │ BUFFER   │  batch 256
+                │ 200K     │  learn every 2
+                └──────────┘
+                       │
+                       ▼
+                ┌──────────────┐
+                │  DOUBLE DQN  │
+                │  target net  │
+                │  tau=0.02    │
+                └──────────────┘
 ```

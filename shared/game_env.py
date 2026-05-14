@@ -238,6 +238,7 @@ class Obstacle:
         self.speed    = speed
         self.counter  = 0
         self.anim_idx = 0
+        self.counted  = False  # tránh reward trùng cho cùng 1 obstacle
 
         if force_type == 'ptera':
             self._init_bird(speed, ptera_y)
@@ -425,8 +426,6 @@ class DinoEnv:
         self.next_spawn_at      = 0
         self.last_obstacle_type = None
         self._base_speed        = INIT_SPEED
-        self.boost_timer        = 0
-        self.boost_cooldown     = random.randint(180, 360)
         self.screen  = None
         self.clock   = None
         self.sprites = None
@@ -486,8 +485,6 @@ class DinoEnv:
         self.next_spawn_at      = 0
         self.last_obstacle_type = None
         self._base_speed        = INIT_SPEED
-        self.boost_timer        = 0
-        self.boost_cooldown     = random.randint(180, 360)
         if self.ground:
             self.ground._x1 = 0.0
             self.ground._x2 = float(self.ground.w)
@@ -497,7 +494,7 @@ class DinoEnv:
         if dino is not None:
             dino.reset()
 
-        return self._build_state()
+        return self._build_state(dino)
 
     def handle_events(self) -> bool:
         for event in pygame.event.get():
@@ -509,7 +506,7 @@ class DinoEnv:
 
     def step_single(self, dino: Dinosaur, action: int) -> tuple:
         if self.game_over:
-            return self._build_state(), 0.0, True, {"points": dino.score}
+            return self._build_state(dino), 0.0, True, {"points": dino.score}
 
         self.points += 1
         dino.steps  += 1
@@ -526,7 +523,9 @@ class DinoEnv:
             dino.unduck()
 
         dino.update()
-        cleared = [ob for ob in self.obs if ob.x + ob.w < dino.x]
+        cleared = [ob for ob in self.obs if ob.x + ob.w < dino.x and not ob.counted]
+        for ob in cleared:
+            ob.counted = True
         if cleared:
             self._cleared_count += len(cleared)
         self._update_obstacles()
@@ -534,36 +533,35 @@ class DinoEnv:
         self._check_collision(dino)
 
         self._base_speed = min(self._base_speed + SPEED_INCREMENT, MAX_SPEED)
-
-        if self.boost_timer > 0:
-            self.boost_timer -= 1
-            if self.boost_timer == 0:
-                self.game_speed = self._base_speed
-                for ob in self.obs:
-                    ob.speed = self.game_speed
-        else:
-            self.game_speed = self._base_speed
-            self.boost_cooldown -= 1
-            if self.boost_cooldown <= 0 and self._base_speed > 6.2:
-                if random.random() < 0.005:
-                    self.boost_timer = 30
-                    self.boost_cooldown = random.randint(180, 360)
-                    self.game_speed = min(self._base_speed * 1.5, MAX_SPEED)
-                    for ob in self.obs:
-                        ob.speed = self.game_speed
-
+        self.game_speed = self._base_speed
         for ob in self.obs:
             ob.speed = self.game_speed
 
         self._spawn_obstacle()
 
         done   = dino.is_dead
-        reward = -50.0 if done else 1.0 + len(cleared) * 10.0
+        if done:
+            reward = -1.0
+        else:
+            bonus = 0.0
+            for ob in cleared:
+                if ob.type_ == "bird":
+                    # Chim cách ground bao xa → quyết định cách vượt
+                    bird_ground_dist = self.ground_y - ob.y - ob.h
+                    if bird_ground_dist < 40:        # chim sát đất → phải nhảy
+                        bonus += 25.0
+                    elif bird_ground_dist < 80:      # chim giữa → nhảy hoặc cúi
+                        bonus += 15.0
+                    else:                            # chim cao → nên cúi
+                        bonus += 30.0 if dino.is_ducking else 5.0
+                else:
+                    bonus += 10.0                    # xương rồng = +10
+            reward = 0.1 + bonus
         if done:
             self.game_over = True
             self._play_sound("die")
 
-        return self._build_state(), reward, done, {"points": dino.score}
+        return self._build_state(dino), reward, done, {"points": dino.score}
 
     # ── Spawn logic – Chrome Dino style ───────────────────────
     # Nguyên tắc Google gốc:
@@ -589,12 +587,15 @@ class DinoEnv:
                 return
 
         # ── Quyết định loại obstacle ────────────────────────────
-        # Không bao giờ spawn ptera ngay sau ptera
-        # Tăng xác suất ptera theo tốc độ (max 20%)
+        # Chim xuất hiện từ đầu → AI học đối phó sớm
         ptera_chance = 0.0
         if self.last_obstacle_type != 'ptera':
-            if self.game_speed > 10:
-                ptera_chance = min(0.20, (self.game_speed - 10) * 0.04)
+            if self.game_speed <= 8:
+                ptera_chance = 0.15
+            elif self.game_speed <= 12:
+                ptera_chance = 0.15 + (self.game_speed - 8) * 0.025
+            else:
+                ptera_chance = 0.25
 
         if random.random() < ptera_chance:
             self._spawn_ptera()
@@ -605,30 +606,26 @@ class DinoEnv:
         self.next_spawn_at    = self._spawn_interval_frames()
 
     def _spawn_interval_frames(self) -> int:
-        # Tính khoảng cách pixel mong muốn giữa hai nhóm,
-        # sau đó quy đổi thành frames theo tốc độ hiện tại.
-        # Chrome Dino gốc: gap_px ≈ 600–1200px ở tốc độ bình thường.
         if self.game_speed <= 8:
-            gap_px = random.randint(600, 950)
-        elif self.game_speed <= 10:
             gap_px = random.randint(500, 800)
-        elif self.game_speed <= 13:
+        elif self.game_speed <= 12:
             gap_px = random.randint(400, 650)
+        elif self.game_speed <= 14:
+            gap_px = random.randint(350, 550)
         else:
             gap_px = random.randint(300, 500)
-        return max(20, int(gap_px / self.game_speed))
+        return max(15, int(gap_px / self.game_speed))
 
     def _spawn_cactus_cluster(self):
-        # Chrome Dino gốc: cluster tối đa 2 ở tốc độ thấp, 3 ở tốc độ cao
         if self.game_speed < 8:
             sizes   = [1, 2]
-            weights = [55, 45]
+            weights = [70, 30]
         elif self.game_speed < 11:
-            sizes   = [1, 2, 3]
-            weights = [35, 35, 30]
+            sizes   = [1, 2]
+            weights = [50, 50]
         else:
-            sizes   = [1, 2, 3, 4]
-            weights = [25, 30, 25, 20]
+            sizes   = [1, 2, 3]
+            weights = [40, 35, 25]
 
         cluster_size = random.choices(sizes, weights=weights)[0]
 
@@ -636,8 +633,7 @@ class DinoEnv:
         for _ in range(cluster_size):
             obs    = Obstacle(self.game_speed, self.sprites, force_type='cactus')
             obs.x += offset
-            # Khoảng cách giữa các cây trong cùng 1 cluster: 8-20px
-            offset += obs.w + random.randint(8, 20)
+            offset += obs.w + random.randint(10, 25)
             self.obs.append(obs)
 
         self.last_obstacle_type = 'cactus'
@@ -689,25 +685,65 @@ class DinoEnv:
 
     # ── State vector ──────────────────────────────────────────
 
-    def _build_state(self) -> np.ndarray:
-        state = [0.0] * STATE_SIZE
+    def _build_state(self, dino: "Dinosaur | None" = None) -> np.ndarray:
+        state = [0.0] * STATE_SIZE  # STATE_SIZE = 12
 
-        # Sort by x: smallest x = furthest right = most dangerous
         sorted_obs = sorted(self.obs, key=lambda ob: ob.x)
+        ref_x = dino.x if dino else 80
 
-        for i, ob in enumerate(sorted_obs[:2]):
-            base = i * 6
-            state[base + 0] = max(0.0, ob.x - 80) / SCREEN_W
-            state[base + 1] = max(0.0, min(1.0,
-                                    (self.ground_y - ob.y - ob.h) / self.ground_y))
-            state[base + 2] = ob.w / 60.0
-            state[base + 3] = 1.0 if ob.type_ == "bird" else 0.0
-            if ob.type_ == "bird":
-                state[base + 4] = max(0.0, min(1.0,
-                                      (self.ground_y - ob.y) / self.ground_y))
+        # [0-4] Cụm obstacle gần nhất: dist, width, max_height, has_bird, bird_y
+        # [5]   bird_x (nếu có chim)
+        if sorted_obs:
+            first = sorted_obs[0]
+            cluster_x = first.x
+            cluster_right = first.x + first.w
+            max_h = first.h
+            has_bird = first.type_ == "bird"
+            bird_y = first.y if has_bird else 0.0
+            bird_x = first.x if has_bird else 0.0
 
-        state[5]  = self.game_speed / MAX_SPEED
-        state[11] = 0.0  # padding
+            for ob in sorted_obs[1:]:
+                if ob.x - cluster_right <= 100:
+                    cluster_right = ob.x + ob.w
+                    max_h = max(max_h, ob.h)
+                    if ob.type_ == "bird":
+                        has_bird = True
+                        bird_y = ob.y
+                        bird_x = ob.x
+                else:
+                    break
+
+            dist_px = cluster_x - ref_x
+            state[0] = max(0.0, min(1.0, dist_px / SCREEN_W))
+            state[1] = min(1.0, (cluster_right - cluster_x) / 200.0)
+            state[2] = min(1.0, max_h / 120.0)
+            state[3] = 1.0 if has_bird else 0.0
+            state[4] = bird_y / max(self.ground_y, 1) if has_bird else 0.0
+            state[5] = bird_x / SCREEN_W if has_bird else 0.0
+
+            # [6] Jump safety
+            if self.game_speed > 0.1:
+                jump_duration = 2 * JUMP_VEL / GRAVITY
+                max_jump_h   = JUMP_VEL**2 / (2 * GRAVITY)
+                if max_h < max_jump_h:
+                    time_to_obs = dist_px / self.game_speed
+                    jump_ok = max(0.0, min(1.0, (jump_duration - time_to_obs) / jump_duration))
+                else:
+                    jump_ok = 0.0
+            else:
+                jump_ok = 0.0
+            state[6] = jump_ok
+
+        # [7] Tốc độ
+        state[7] = self.game_speed / MAX_SPEED
+
+        # [8-11] Dino state
+        if dino is not None:
+            state[8] = dino.y / max(self.ground_y, 1)
+            state[9] = dino._vel_y / max(dino.jump_vel, 1)
+            state[10] = 1.0 if dino.is_jumping else 0.0
+            state[11] = 1.0 if dino.is_ducking else 0.0
+
         return np.array(state, dtype=np.float32)
 
     # ── Render helpers ────────────────────────────────────────
@@ -772,11 +808,10 @@ class DinoEnv:
 
         name       = ai_info.get("name", "AI")
         generation = ai_info.get("generation", 0)
-        speed      = ai_info.get("speed", 0)
-        boosting   = self.boost_timer > 0
+        speed = ai_info.get("speed", 0)
 
         panel_w = 200
-        panel_h = 80 if boosting else 62
+        panel_h = 62
         panel_x = SCREEN_W - panel_w - 12
         panel_y = 36
 
@@ -785,12 +820,10 @@ class DinoEnv:
         pygame.draw.rect(self.screen, (70, 70, 70),
                          (panel_x, panel_y, panel_w, panel_h), 2, border_radius=6)
 
-        name_color = (255, 140, 60) if boosting else (100, 220, 100)
-        self.screen.blit(font.render(name, True, name_color),
+        self.screen.blit(font.render(name, True, (100, 220, 100)),
                          (panel_x + 8, panel_y + 8))
 
-        speed_color = (255, 200, 80) if boosting else (180, 180, 180)
-        self.screen.blit(small.render(f"Speed: {speed:.1f}", True, speed_color),
+        self.screen.blit(small.render(f"Speed: {speed:.1f}", True, (180, 180, 180)),
                          (panel_x + 8, panel_y + 30))
 
         act        = ai_info.get("last_action", -1)
@@ -802,11 +835,6 @@ class DinoEnv:
         self.screen.blit(small.render(f"Steps: {ai_info.get('steps', 0)}",
                                       True, (180, 180, 180)),
                          (panel_x + 100, panel_y + 48))
-
-        if boosting:
-            boost_left = f"BOOST: {self.boost_timer}f"
-            self.screen.blit(small.render(boost_left, True, (255, 80, 80)),
-                             (panel_x + 8, panel_y + 64))
 
     def render_frame(self, dino: Dinosaur, hi_score: int = 0,
                      ai_info: dict | None = None):

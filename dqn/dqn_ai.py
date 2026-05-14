@@ -6,14 +6,15 @@
 #    QNetwork      – mạng nơ-ron dự đoán Q-value
 #    DQNDinoAI     – lớp AI chính, kế thừa BaseDinoAI
 #
-#  State (12 chiều = 2 vật gần nhất × 6 features):
-#    [0] dist_to_obs     – khoảng cách đến chướng ngại / SCREEN_W
-#    [1] obs_height      – độ cao đáy chướng ngại / ground_y
-#    [2] obs_width       – chiều rộng chướng ngại / 60
-#    [3] is_bird         – 1.0 nếu là chim, 0.0 nếu xương rồng
-#    [4] bird_height     – chiều cao chim so với mặt đất
-#    [5] speed_ratio     – game_speed / MAX_SPEED
-#    [6-11]              – lặp lại cho vật thứ 2
+#  State (12 chiều) — cụm obstacle + bird_x + jump_safety + dino:
+#    [0-4]   cụm: dist, total_width, max_height, has_bird, bird_y
+#    [5]     bird_x / SCREEN_W (0 nếu ko có chim)
+#    [6]     jump_safety
+#    [7]     game_speed / MAX_SPEED
+#    [8]     dino_y / ground_y
+#    [9]     dino_vel_y / jump_vel
+#    [10]    is_jumping (0/1)
+#    [11]    is_ducking (0/1)
 #
 #  Action:
 #    0 = cúi (duck)
@@ -37,34 +38,32 @@ from shared.base_ai import BaseDinoAI
 # ──────────────────────────────────────────────────────────
 #  Cấu hình DQN  (chỉnh ở đây, không cần sửa class bên dưới)
 # ──────────────────────────────────────────────────────────
+# dqn_ai.py
+
 DQN_CONFIG = {
-    # Kiến trúc mạng
-    "hidden_sizes"   : [128, 128],   # kích thước các lớp ẩn
-    "state_size"     : 12,           # 2 vật × 6 features
+    # Mạng: 12→128→64→3  (~10K tham số)
+    "hidden_sizes"   : [128, 64],
+    "state_size"     : 12,
     "action_size"    : 3,
 
-    # Replay buffer
-    "buffer_capacity": 50_000,
-    "batch_size"     : 64,
+    "buffer_capacity": 200_000,
+    "batch_size"     : 256,
+    "learn_start"    : 5_000,
 
-    # Học tập
-    "lr"             : 1e-3,
-    "gamma"          : 0.97,
-    "tau"            : 0.005,
+    "lr"    : 5e-5,
+    "gamma" : 0.995,
+    "tau"   : 0.02,
 
-    # Epsilon-greedy
-    # FIX: 0.9995 → 0.995 (nhanh hơn 6×, về ~0.05 sau ~600 ep thay vì ~6000 ep)
     "eps_start"      : 1.0,
-    "eps_end"        : 0.05,
-    "eps_decay"      : 0.995,
+    "eps_decay"      : 0.997,
+    "eps_end"        : 0.02,              # 2% noise — đã đạt 1029 với config này
 
-    # Target network update
-    "target_update_freq": 200,
+    "target_update_freq": 1000,
     "use_soft_update": True,
 
-    # Training
-    "learn_start"    : 1_000,
-    "learn_every"    : 4,
+    "learn_every": 2,
+    "grad_clip"  : 1.0,
+    "dropout"    : 0.0,
 }
 
 
@@ -108,12 +107,14 @@ class QNetwork(nn.Module):
     """Mạng nơ-ron dự đoán Q(s, a) cho mọi action cùng lúc."""
 
     def __init__(self, state_size: int, action_size: int,
-                 hidden_sizes: list):
+                 hidden_sizes: list, dropout: float = 0.0):
         super().__init__()
         layers = []
         in_size = state_size
         for h in hidden_sizes:
             layers += [nn.Linear(in_size, h), nn.ReLU()]
+            if dropout > 0:
+                layers.append(nn.Dropout(dropout))
             in_size = h
         layers.append(nn.Linear(in_size, action_size))
         self.net = nn.Sequential(*layers)
@@ -145,15 +146,16 @@ class DQNDinoAI(BaseDinoAI):
         s = self.cfg["state_size"]
         a = self.cfg["action_size"]
         h = self.cfg["hidden_sizes"]
+        d = self.cfg.get("dropout", 0.0)
 
-        self.q_net      = QNetwork(s, a, h).to(self.device)
-        self.target_net = QNetwork(s, a, h).to(self.device)
+        self.q_net      = QNetwork(s, a, h, dropout=d).to(self.device)
+        self.target_net = QNetwork(s, a, h, dropout=d).to(self.device)
         self.target_net.load_state_dict(self.q_net.state_dict())
         self.target_net.eval()
 
         self.optimizer = optim.Adam(self.q_net.parameters(),
                                     lr=self.cfg["lr"])
-        self.loss_fn   = nn.MSELoss()
+        self.loss_fn = nn.SmoothL1Loss()  # Huber — ổn định với value range nhỏ
 
         self.buffer   = ReplayBuffer(self.cfg["buffer_capacity"])
         self.epsilon  = self.cfg["eps_start"]
@@ -207,7 +209,8 @@ class DQNDinoAI(BaseDinoAI):
         loss = self.loss_fn(current_q, target_q)
         self.optimizer.zero_grad()
         loss.backward()
-        nn.utils.clip_grad_norm_(self.q_net.parameters(), max_norm=1.0)
+        nn.utils.clip_grad_norm_(self.q_net.parameters(),
+                                max_norm=self.cfg.get("grad_clip", 1.0))
         self.optimizer.step()
 
         if self.cfg["use_soft_update"]:
@@ -255,20 +258,12 @@ class DQNDinoAI(BaseDinoAI):
 
             ep_reward = 0
             ep_steps  = 0
-
             for _ in range(max_steps_per_ep):
                 action = self._select_action(state, training=True)
-                next_state, reward, done, info = env.step_single(dino, action)
+                next_state, env_reward, done, info = env.step_single(dino, action)
 
-                # ── Reward shaping ──────────────────────────────
-                # FIX: -100 → -10  (tỉ lệ chết/sống từ 50:1 → 5:1)
-                if done:
-                    shaped_reward = -10.0
-                elif reward > 0:
-                    shaped_reward = 1.0 + env.game_speed * 0.05
-                else:
-                    shaped_reward = 0.0
-                # ────────────────────────────────────────────────
+                # Reward: death=-1, alive=0.1, cactus=+10, bird_low=+25, bird_mid=+15, bird_high_duck=+30, bird_high_jump=+5
+                shaped_reward = env_reward
 
                 self.buffer.push(state, action, shaped_reward, next_state, done)
                 state      = next_state
@@ -288,7 +283,7 @@ class DQNDinoAI(BaseDinoAI):
 
             # Decay epsilon
             self.epsilon = max(self.cfg["eps_end"],
-                               self.epsilon * self.cfg["eps_decay"])
+                            self.epsilon * self.cfg["eps_decay"])
 
             ep_score = info["points"]
             score_history.append(ep_score)
