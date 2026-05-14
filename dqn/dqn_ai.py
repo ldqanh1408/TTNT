@@ -6,15 +6,16 @@
 #    QNetwork      – mạng nơ-ron dự đoán Q-value
 #    DQNDinoAI     – lớp AI chính, kế thừa BaseDinoAI
 #
-#  State (12 chiều) — cụm obstacle + bird_x + jump_safety + dino:
+#  State (13 chiều) — cụm obstacle + bird_x + jump_safety + bird_high + dino:
 #    [0-4]   cụm: dist, total_width, max_height, has_bird, bird_y
-#    [5]     bird_x / SCREEN_W (0 nếu ko có chim)
+#    [5]     bird_x / SCREEN_W
 #    [6]     jump_safety
-#    [7]     game_speed / MAX_SPEED
-#    [8]     dino_y / ground_y
-#    [9]     dino_vel_y / jump_vel
-#    [10]    is_jumping (0/1)
-#    [11]    is_ducking (0/1)
+#    [7]     bird_high: 1.0 nếu chim cao → nên cúi
+#    [8]     game_speed / MAX_SPEED
+#    [9]     dino_y / ground_y
+#    [10]    dino_vel_y / jump_vel
+#    [11]    is_jumping (0/1)
+#    [12]    is_ducking (0/1)
 #
 #  Action:
 #    0 = cúi (duck)
@@ -41,9 +42,9 @@ from shared.base_ai import BaseDinoAI
 # dqn_ai.py
 
 DQN_CONFIG = {
-    # Mạng: 12→128→64→3  (~10K tham số)
+    # Mạng: 13→128→64→3
     "hidden_sizes"   : [128, 64],
-    "state_size"     : 12,
+    "state_size"     : 13,
     "action_size"    : 3,
 
     "buffer_capacity": 200_000,

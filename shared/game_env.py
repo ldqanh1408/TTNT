@@ -686,13 +686,11 @@ class DinoEnv:
     # ── State vector ──────────────────────────────────────────
 
     def _build_state(self, dino: "Dinosaur | None" = None) -> np.ndarray:
-        state = [0.0] * STATE_SIZE  # STATE_SIZE = 12
+        state = [0.0] * STATE_SIZE  # STATE_SIZE = 13
 
         sorted_obs = sorted(self.obs, key=lambda ob: ob.x)
         ref_x = dino.x if dino else 80
 
-        # [0-4] Cụm obstacle gần nhất: dist, width, max_height, has_bird, bird_y
-        # [5]   bird_x (nếu có chim)
         if sorted_obs:
             first = sorted_obs[0]
             cluster_x = first.x
@@ -701,6 +699,10 @@ class DinoEnv:
             has_bird = first.type_ == "bird"
             bird_y = first.y if has_bird else 0.0
             bird_x = first.x if has_bird else 0.0
+            bird_high = 0.0
+
+            if has_bird and self.ground_y - first.y - first.h > 80:
+                bird_high = 1.0
 
             for ob in sorted_obs[1:]:
                 if ob.x - cluster_right <= 100:
@@ -710,6 +712,8 @@ class DinoEnv:
                         has_bird = True
                         bird_y = ob.y
                         bird_x = ob.x
+                        if self.ground_y - ob.y - ob.h > 80:
+                            bird_high = 1.0
                 else:
                     break
 
@@ -734,15 +738,18 @@ class DinoEnv:
                 jump_ok = 0.0
             state[6] = jump_ok
 
-        # [7] Tốc độ
-        state[7] = self.game_speed / MAX_SPEED
+            # [7] bird_high — tín hiệu tường minh: nên cúi
+            state[7] = bird_high
 
-        # [8-11] Dino state
+        # [8] Tốc độ
+        state[8] = self.game_speed / MAX_SPEED
+
+        # [9-12] Dino state
         if dino is not None:
-            state[8] = dino.y / max(self.ground_y, 1)
-            state[9] = dino._vel_y / max(dino.jump_vel, 1)
-            state[10] = 1.0 if dino.is_jumping else 0.0
-            state[11] = 1.0 if dino.is_ducking else 0.0
+            state[9] = dino.y / max(self.ground_y, 1)
+            state[10] = dino._vel_y / max(dino.jump_vel, 1)
+            state[11] = 1.0 if dino.is_jumping else 0.0
+            state[12] = 1.0 if dino.is_ducking else 0.0
 
         return np.array(state, dtype=np.float32)
 

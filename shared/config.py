@@ -74,16 +74,17 @@ BIRD_W = 64   # sau BIRD_SCALE=0.70
 BIRD_H = 56
 
 # ─── State / Action ───────────────────────────────────────
-# 12D: 1 cụm obstacle × 5 + bird_x + jump_safety + speed + 4 dino state
+# 13D: 1 cụm obstacle × 5 + bird_x + jump_safety + bird_high + speed + 4 dino state
 #   [0-4]   cụm: dist, total_width, max_height, has_bird, bird_y
-#   [5]     bird_x / SCREEN_W (0 nếu ko có chim)
+#   [5]     bird_x / SCREEN_W
 #   [6]     jump_safety
-#   [7]     game_speed / MAX_SPEED
-#   [8]     dino_y / ground_y
-#   [9]     dino_vel_y / jump_vel
-#   [10]    is_jumping (0/1)
-#   [11]    is_ducking (0/1)
-STATE_SIZE  = 12
+#   [7]     bird_high: 1.0 nếu chim cao (nên cúi), 0 nếu ko
+#   [8]     game_speed / MAX_SPEED
+#   [9]     dino_y / ground_y
+#   [10]    dino_vel_y / jump_vel
+#   [11]    is_jumping (0/1)
+#   [12]    is_ducking (0/1)
+STATE_SIZE  = 13
 ACTION_SIZE = 3
 
 # ─── Training ─────────────────────────────────────────────

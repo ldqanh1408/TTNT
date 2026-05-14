@@ -59,7 +59,7 @@ python dqn/train_dqn.py --watch      # Xem AI chơi (5 ván)
 | `INIT_SPEED` | 6.0 | Tốc độ game ban đầu |
 | `SPEED_INCREMENT` | 0.005 / frame | Tốc độ tăng dần |
 | `MAX_SPEED` | 16.0 | Tốc độ tối đa |
-| `STATE_SIZE` | 12 | Kích thước state vector |
+| `STATE_SIZE` | 13 | Kích thước state vector |
 | `ACTION_SIZE` | 3 | Số action (duck/jump/run) |
 | `DINO_SCALE` | 0.45 | Tỉ lệ thu nhỏ dino |
 | `OBSTACLE_SCALE` | 0.80 | Tỉ lệ thu nhỏ xương rồng |
@@ -74,9 +74,9 @@ H = JUMP_VEL² / (2 × GRAVITY) = 18.5² / 2.2 ≈ 155 px
 
 ---
 
-## State Vector (12D)
+## State Vector (13D)
 
-Mỗi frame, AI nhận vector 12 chiều:
+Mỗi frame, AI nhận vector 13 chiều:
 
 | Index | Tên | Công thức | Ý nghĩa |
 |---|---|---|---|
@@ -86,12 +86,13 @@ Mỗi frame, AI nhận vector 12 chiều:
 | 3 | **has_bird** | `0` hoặc `1` | Có chim trong cụm? |
 | 4 | **bird_y** | `bird.y / ground_y` | Vị trí dọc của chim |
 | 5 | **bird_x** | `bird.x / 1200` | Tọa độ x của chim |
-| 6 | **jump_safety** | `(34 - dist/speed) / 34` | Nhảy bây giờ có clear không? |
-| 7 | **speed** | `game_speed / 16` | Tốc độ game hiện tại |
-| 8 | **dino_y** | `dino.y / ground_y` | Vị trí dọc dino |
-| 9 | **dino_vel** | `dino.vel_y / 18.5` | Vận tốc dọc (âm=lên) |
-| 10 | **is_jumping** | `0` hoặc `1` | Đang nhảy? |
-| 11 | **is_ducking** | `0` hoặc `1` | Đang cúi? |
+| 6 | **jump_safety** | `(34 - dist/speed) / 34` | Nhảy bây giờ có clear? (1=an toàn) |
+| 7 | **bird_high** | `0` hoặc `1` | Chim cao → nên CÚI |
+| 8 | **speed** | `game_speed / 16` | Tốc độ game |
+| 9 | **dino_y** | `dino.y / ground_y` | Vị trí dọc dino |
+| 10 | **dino_vel** | `dino.vel_y / 18.5` | Vận tốc dọc (âm=lên) |
+| 11 | **is_jumping** | `0` hoặc `1` | Đang nhảy? |
+| 12 | **is_ducking** | `0` hoặc `1` | Đang cúi? |
 
 ### Cụm obstacle (cluster)
 
@@ -99,19 +100,30 @@ Vật cản cách nhau ≤ 100px được gộp thành 1 cụm:
 - **dist**: khoảng cách đến vật đầu tiên trong cụm
 - **width**: tổng độ rộng từ đầu đến cuối cụm
 - **max_h**: chiều cao vật cao nhất
-- **has_bird / bird_x / bird_y**: thông tin chim nếu có
+- **has_bird / bird_x / bird_y / bird_high**: thông tin chim nếu có
 
-### Jump Safety
+### Jump Safety (state[6])
 
 Dựa trên vật lý nhảy: `jump_duration ≈ 34 frames`
 
 ```
 jump_safety = (34 - distance/speed) / 34   (clip 0→1)
 
-  dist=300, speed=10 → time=30 → safety=0.12 (có thể nhảy)
-  dist=170, speed=10 → time=17 → safety=0.50 (lý tưởng)
-  dist=50,  speed=10 → time=5  → safety=0.85 (hơi trễ)
+  dist=300, speed=10 → time=30 → 0.12 (có thể nhảy)
+  dist=170, speed=10 → time=17 → 0.50 (lý tưởng)
+  dist=50,  speed=10 → time=5  → 0.85 (hơi trễ)
 ```
+
+> Nếu `max_h > 155px` → jump_safety = 0 (vật quá cao, không nhảy qua được)
+
+### Bird High (state[7])
+
+```
+bird_high = 1.0 nếu chim cách ground > 80px (chim cao → cúi đầu)
+            0.0 nếu không có chim hoặc chim thấp (phải nhảy)
+```
+
+Tín hiệu tường minh — AI không cần suy luận từ bird_y.
 
 ---
 
@@ -159,7 +171,7 @@ Khoảng cách giữa các cây trong cụm: 10-25px.
 | 8-12 | 15-25% |
 | > 12 | 25% |
 
-Không spawn chim 2 lần liên tiếp. 3 độ cao: sát đất, giữa, cao.
+Không spawn chim 2 lần liên tiếp. 3 độ cao: sát đất (phải nhảy), giữa, cao (nên cúi).
 
 ### Khoảng cách giữa các nhóm
 
@@ -175,7 +187,7 @@ Không spawn chim 2 lần liên tiếp. 3 độ cao: sát đất, giữa, cao.
 ## Kiến trúc DQN
 
 ```
-Input(12) → Linear(128) → ReLU → Linear(64) → ReLU → Linear(3)
+Input(13) → Linear(128) → ReLU → Linear(64) → ReLU → Linear(3)
 ```
 
 ~10,000 tham số. Double DQN + soft target update + Huber loss.
@@ -184,12 +196,12 @@ Input(12) → Linear(128) → ReLU → Linear(64) → ReLU → Linear(3)
 
 | Param | Value | Giải thích |
 |---|---|---|
-| `lr` | `5e-5` | Learning rate |
-| `gamma` | `0.995` | Discount factor |
-| `tau` | `0.02` | Soft target update rate |
-| `batch_size` | `256` | Batch size |
-| `buffer_capacity` | `200_000` | Replay buffer (~600 episodes) |
-| `learn_start` | `5_000` | Số exp tối thiểu trước khi học |
+| `lr` | `5e-5` | Learning rate thấp → ổn định |
+| `gamma` | `0.995` | Discount cao → ưu tiên sống lâu |
+| `tau` | `0.02` | Soft target update chậm → ổn định |
+| `batch_size` | `256` | Batch lớn → gradient ổn định |
+| `buffer_capacity` | `200_000` | ~600 episodes gần nhất |
+| `learn_start` | `5_000` | Đợi đủ experience mới học |
 | `learn_every` | `2` | Học mỗi 2 steps |
 | `grad_clip` | `1.0` | Gradient clipping |
 | `loss` | SmoothL1Loss | Huber loss |
@@ -200,9 +212,9 @@ Input(12) → Linear(128) → ReLU → Linear(64) → ReLU → Linear(3)
 ### Sơ đồ
 
 ```
-┌──────────┐    state(12)     ┌───────────────┐    action(3)
+┌──────────┐    state(13)     ┌───────────────┐    action(3)
 │   GAME   │ ───────────────► │   Q-NETWORK   │ ──────────────► DINO
-│   ENV    │                  │  12→128→64→3  │
+│   ENV    │                  │  13→128→64→3  │
 │          │ ◄────────────────│               │
 └──────────┘   (s,a,r,s',done)└───────────────┘
       │                               ▲
@@ -219,9 +231,9 @@ Input(12) → Linear(128) → ReLU → Linear(64) → ReLU → Linear(3)
 
 | Metric | Value |
 |---|---|
-| Train best | **1029** |
-| Eval mean | 94 |
-| Eval max | 178 |
+| Train best | **1372** |
+| Eval mean | 182 |
+| Eval max | 326 |
 
 ---
 
@@ -244,7 +256,7 @@ class MyAI(BaseDinoAI):
         super().__init__(name="MyAI")
 
     def predict(self, state: np.ndarray) -> int:
-        """state: 12D vector → action: 0=duck, 1=jump, 2=run"""
+        """state: 13D vector → action: 0=duck, 1=jump, 2=run"""
         return 2
 
     def train(self, **kwargs):
