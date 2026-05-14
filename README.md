@@ -1,261 +1,268 @@
 # Chrome Dino AI — Đồ án AI
 
-Dự án game Chrome Dino kết hợp AI: 3 thành viên, mỗi người cài đặt 1 thuật toán AI khác nhau (Genetic Algorithm, Particle Swarm Optimization, Deep Q-Network) để điều khiển khủng long tự động vượt chướng ngại vật.
+Dự án game Chrome Dino kết hợp AI điều khiển khủng long tự động vượt chướng ngại vật.
 
 ## Cấu trúc thư mục
 
 ```
 PythonProject/
-├── main.py                  # Điểm vào chính: so sánh AI, xem AI chơi, chơi tay
-├── template_ai.py           # FILE MẪU — mỗi thành viên copy & đổi tên để viết AI
-├── README.md                # File này
-├── requirements.txt         # Thư viện cần cài
+├── main.py                  # Điểm vào chính
+├── template_ai.py           # Template cho AI mới
+├── README.md
+├── requirements.txt
 │
-├── shared/                  # PHẦN CHUNG — không cần sửa
-│   ├── config.py            # Hằng số: màn hình, tốc độ, jump physics, state size
-│   ├── base_ai.py           # Lớp abstract BaseDinoAI — mọi AI phải kế thừa
-│   ├── game_env.py          # Môi trường game: khủng long, chướng ngại vật, logic
-│   ├── renderer.py          # Load & scale sprite từ sprite sheet
-│   ├── evaluator.py         # Công cụ đánh giá & so sánh các AI
-│   ├── manual_play.py       # Chế độ chơi tay bằng bàn phím
-│   └── templates/           # Sprite sheet ảnh (dino, cactus, ptera...)
+├── shared/                  # PHẦN CHUNG
+│   ├── config.py            # Hằng số game, state size, action size
+│   ├── base_ai.py           # Lớp abstract BaseDinoAI
+│   ├── game_env.py          # Game environment + spawn logic + reward
+│   ├── renderer.py          # Load & scale sprite
+│   ├── evaluator.py         # Đánh giá & so sánh AI
+│   └── manual_play.py       # Chơi tay
 │
-├── dqn/                     # DQN — Deep Q-Network
+├── dqn/                     # Deep Q-Network
 │   ├── dqn_ai.py            # QNetwork, ReplayBuffer, DQNDinoAI
-│   ├── train_dqn.py         # Script huấn luyện + dashboard
-│   └── colab_train.ipynb    # Notebook train trên Kaggle/Colab
+│   ├── train_dqn.py         # Script train + dashboard
+│   └── README.md            # Chi tiết DQN
 │
-└── models/                  # Model đã train (tự tạo)
+└── model/                   # Model đã train
     └── dqn_best.pkl
 ```
 
 ## Cài đặt
 
 ```bash
-# Python 3.10+ + GPU (tuỳ chọn, cho DQN)
-
-# Cài thư viện
 pip install pygame numpy matplotlib pillow torch
-
-# Hoặc:
-pip install -r requirements.txt
+# hoặc: pip install -r requirements.txt
 ```
 
 ## Cách chạy
 
 ```bash
-# === DQN ===
-python dqn/train_dqn.py              # Huấn luyện từ đầu (2000 episodes)
+python dqn/train_dqn.py              # Train DQN từ đầu (2000 episodes)
 python dqn/train_dqn.py --resume     # Tiếp tục train từ checkpoint
-python dqn/train_dqn.py --eval       # Đánh giá không render (20 lần)
-python dqn/train_dqn.py --watch      # Xem AI đã train chơi (5 ván)
-
-# === Tất cả AI ===
-python main.py --mode compare        # So sánh 3 AI (headless)
-python main.py --mode watch          # Xem AI tốt nhất chơi
-python main.py --mode manual         # Tự chơi tay
-python main.py --mode train_all      # Huấn luyện tất cả
+python dqn/train_dqn.py --eval       # Đánh giá (10 runs, không render)
+python dqn/train_dqn.py --watch      # Xem AI chơi (5 ván)
 ```
 
-## State vector (16 chiều)
+---
 
-DQN dùng state 16 chiều — 2 obstacle gần nhất + game speed + dino self-state:
+## Game Config (`shared/config.py`)
 
-| Index | Feature | Công thức |
-|-------|---------|-----------|
-| **Obstacle 1 (gần nhất)** | | |
-| 0 | Khoảng cách | `(ob.x - 80) / SCREEN_W` |
-| 1 | Chiều cao obstacle | `(ground_y - ob.y - ob.h) / ground_y` |
-| 2 | Chiều rộng | `ob.w / 60` |
-| 3 | Là chim? | `1.0` nếu ptera, `0.0` nếu cactus |
-| 4 | Độ cao chim | `(ground_y - ob.y) / ground_y` (chỉ khi is_bird) |
-| 5 | Tốc độ game | `game_speed / MAX_SPEED` |
-| **Obstacle 2** | | |
-| 6-10 | Tương tự obstacle 1 | |
-| **Dino self-state** | | |
-| 11 | Độ cao dino | `y / ground_y` |
-| 12 | Vận tốc dọc | `vel_y / jump_vel` (âm = đang bay lên) |
-| 13 | Đang nhảy? | `1.0` nếu `is_jumping` |
-| 14 | Đang cúi? | `1.0` nếu `is_ducking` |
-| 15 | Padding | `0.0` (dự phòng) |
+| Hằng số | Value | Ý nghĩa |
+|---|---|---|
+| `SCREEN_W` | 1200 | Chiều rộng màn hình |
+| `SCREEN_H` | 450 | Chiều cao màn hình |
+| `FPS` | 60 | Khung hình/giây |
+| `GROUND_Y_OFFSET` | 20 | Khoảng cách ground đến đáy màn hình |
+| `GRAVITY` | 1.1 px/frame² | Trọng lực |
+| `JUMP_VEL` | 18.5 px/frame | Vận tốc nhảy ban đầu |
+| `INIT_SPEED` | 6.0 | Tốc độ game ban đầu |
+| `SPEED_INCREMENT` | 0.005 / frame | Tốc độ tăng dần |
+| `MAX_SPEED` | 16.0 | Tốc độ tối đa |
+| `STATE_SIZE` | 12 | Kích thước state vector |
+| `ACTION_SIZE` | 3 | Số action (duck/jump/run) |
+| `DINO_SCALE` | 0.45 | Tỉ lệ thu nhỏ dino |
+| `OBSTACLE_SCALE` | 0.80 | Tỉ lệ thu nhỏ xương rồng |
+| `BIRD_SCALE` | 0.70 | Tỉ lệ thu nhỏ chim |
 
-**Action space (3 actions):**
-- `0` = Duck (cúi)
-- `1` = Jump (nhảy)
-- `2` = Run (chạy)
+### Công thức nhảy
+
+```
+T = 2 × JUMP_VEL / GRAVITY = 2 × 18.5 / 1.1 ≈ 34 frames (0.57s)
+H = JUMP_VEL² / (2 × GRAVITY) = 18.5² / 2.2 ≈ 155 px
+```
+
+---
+
+## State Vector (12D)
+
+Mỗi frame, AI nhận vector 12 chiều:
+
+| Index | Tên | Công thức | Ý nghĩa |
+|---|---|---|---|
+| 0 | **dist** | `(cluster_x - dino.x) / 1200` | Khoảng cách đến cụm vật cản |
+| 1 | **width** | `cluster_width / 200` | Tổng độ rộng cụm |
+| 2 | **max_h** | `max_height / 120` | Chiều cao cây cao nhất trong cụm |
+| 3 | **has_bird** | `0` hoặc `1` | Có chim trong cụm? |
+| 4 | **bird_y** | `bird.y / ground_y` | Vị trí dọc của chim |
+| 5 | **bird_x** | `bird.x / 1200` | Tọa độ x của chim |
+| 6 | **jump_safety** | `(34 - dist/speed) / 34` | Nhảy bây giờ có clear không? |
+| 7 | **speed** | `game_speed / 16` | Tốc độ game hiện tại |
+| 8 | **dino_y** | `dino.y / ground_y` | Vị trí dọc dino |
+| 9 | **dino_vel** | `dino.vel_y / 18.5` | Vận tốc dọc (âm=lên) |
+| 10 | **is_jumping** | `0` hoặc `1` | Đang nhảy? |
+| 11 | **is_ducking** | `0` hoặc `1` | Đang cúi? |
+
+### Cụm obstacle (cluster)
+
+Vật cản cách nhau ≤ 100px được gộp thành 1 cụm:
+- **dist**: khoảng cách đến vật đầu tiên trong cụm
+- **width**: tổng độ rộng từ đầu đến cuối cụm
+- **max_h**: chiều cao vật cao nhất
+- **has_bird / bird_x / bird_y**: thông tin chim nếu có
+
+### Jump Safety
+
+Dựa trên vật lý nhảy: `jump_duration ≈ 34 frames`
+
+```
+jump_safety = (34 - distance/speed) / 34   (clip 0→1)
+
+  dist=300, speed=10 → time=30 → safety=0.12 (có thể nhảy)
+  dist=170, speed=10 → time=17 → safety=0.50 (lý tưởng)
+  dist=50,  speed=10 → time=5  → safety=0.85 (hơi trễ)
+```
+
+---
+
+## Action Space
+
+| Action | Hành động |
+|---|---|
+| 0 | **DUCK** |
+| 1 | **JUMP** |
+| 2 | **RUN** |
+
+---
+
+## Reward Function
+
+| Sự kiện | Reward |
+|---|---|
+| Chết | **-1.0** |
+| Sống mỗi frame | **+0.1** |
+| Vượt xương rồng | **+10.0** |
+| Vượt chim thấp (<40px ground) — phải nhảy | **+25.0** |
+| Vượt chim giữa (40-80px) | **+15.0** |
+| Vượt chim cao (>80px) — cúi | **+30.0** |
+| Vượt chim cao (>80px) — nhảy | **+5.0** |
+
+---
+
+## Spawn Logic
+
+### Xương rồng
+
+| Tốc độ | Cluster size |
+|---|---|
+| < 8 | 1-2 cây (70% 1 cây) |
+| 8-11 | 1-2 cây (50% 2 cây) |
+| > 11 | 1-3 cây |
+
+Khoảng cách giữa các cây trong cụm: 10-25px.
+
+### Chim (Ptera)
+
+| Tốc độ | Tỉ lệ spawn |
+|---|---|
+| ≤ 8 | 15% |
+| 8-12 | 15-25% |
+| > 12 | 25% |
+
+Không spawn chim 2 lần liên tiếp. 3 độ cao: sát đất, giữa, cao.
+
+### Khoảng cách giữa các nhóm
+
+| Tốc độ | Gap |
+|---|---|
+| ≤ 8 | 500-800 px |
+| 8-12 | 400-650 px |
+| 12-14 | 350-550 px |
+| > 14 | 300-500 px |
+
+---
 
 ## Kiến trúc DQN
 
 ```
-State (16) → Linear(512) → ReLU → Dropout(0.1)
-           → Linear(512) → ReLU → Dropout(0.1)
-           → Linear(256) → ReLU → Dropout(0.1)
-           → Linear(3)   → Q(s,a)
+Input(12) → Linear(128) → ReLU → Linear(64) → ReLU → Linear(3)
 ```
 
-| Tham số | Giá trị | Ý nghĩa |
-|---------|---------|---------|
-| `lr` | 3e-5 | Learning rate (Adam) |
-| `gamma` | 0.99 | Discount factor |
-| `tau` | 0.005 | Soft update rate cho target network |
-| `eps_start` | 1.0 | Epsilon ban đầu (100% random) |
-| `eps_decay` | 0.998 | Decay mỗi episode |
-| `eps_end` | 0.02 | Epsilon tối thiểu (2% explore) |
-| `buffer_capacity` | 200,000 | Replay buffer size |
-| `batch_size` | 64 | Batch size mỗi lần học |
-| `learn_start` | 5,000 | Số experience tối thiểu trước khi học |
-| `learn_every` | 4 | Học mỗi 4 steps |
-| `dropout` | 0.1 | Regularization |
-| `grad_clip` | 1.0 | Gradient clipping max norm |
+~10,000 tham số. Double DQN + soft target update + Huber loss.
 
-**Loss function:** SmoothL1Loss (Huber) — ổn định hơn MSE cho DQN.
+### Hyperparameters
 
-**Thuật toán:** Double DQN với soft target update — online network chọn action, target network đánh giá Q-value.
+| Param | Value | Giải thích |
+|---|---|---|
+| `lr` | `5e-5` | Learning rate |
+| `gamma` | `0.995` | Discount factor |
+| `tau` | `0.02` | Soft target update rate |
+| `batch_size` | `256` | Batch size |
+| `buffer_capacity` | `200_000` | Replay buffer (~600 episodes) |
+| `learn_start` | `5_000` | Số exp tối thiểu trước khi học |
+| `learn_every` | `2` | Học mỗi 2 steps |
+| `grad_clip` | `1.0` | Gradient clipping |
+| `loss` | SmoothL1Loss | Huber loss |
+| `eps_start` | `1.0` | Epsilon ban đầu |
+| `eps_decay` | `0.997` | Decay mỗi episode |
+| `eps_end` | `0.02` | Epsilon tối thiểu |
 
-## Reward function
+### Sơ đồ
 
 ```
-reward = env_reward + 0.05                    (survival bonus nhẹ)
-
-env_reward = -50.0                            (nếu chết)
-env_reward = 1.0 + len(cleared_obstacles) × 10  (nếu sống)
+┌──────────┐    state(12)     ┌───────────────┐    action(3)
+│   GAME   │ ───────────────► │   Q-NETWORK   │ ──────────────► DINO
+│   ENV    │                  │  12→128→64→3  │
+│          │ ◄────────────────│               │
+└──────────┘   (s,a,r,s',done)└───────────────┘
+      │                               ▲
+      │         ┌───────────┐         │
+      └────────►│  REPLAY   │─────────┘
+                │  BUFFER   │  batch 256
+                │  200K     │
+                └───────────┘
 ```
 
-Mỗi obstacle vượt qua được thưởng +10 điểm — đây là tín hiệu chính để agent học cách né.
+---
 
-## Huấn luyện DQN
+## Kết quả tốt nhất (DQN)
 
-### Local (CPU/GPU)
+| Metric | Value |
+|---|---|
+| Train best | **1029** |
+| Eval mean | 94 |
+| Eval max | 178 |
+
+---
+
+## Cách thêm AI mới
+
+### 1. Copy template
 
 ```bash
-python dqn/train_dqn.py
+cp template_ai.py my_ai.py
 ```
 
-- 2000 episodes, mỗi ep tối đa 10,000 steps
-- Model tốt nhất tự động lưu vào `model/dqn_best.pkl`
-- Dashboard lưu vào `model/training_curve.png`
-- In log mỗi 50 episodes
-
-### Kaggle (GPU T4 x2, free)
-
-1. Mở notebook `dqn/colab_train.ipynb` trên Kaggle
-2. Accelerator → GPU T4 x2
-3. Upload 3 folder `shared/`, `dqn/`, `templates/` vào `/kaggle/working/`
-4. Run all
-
-| Thời gian | Episodes | Chất lượng |
-|-----------|----------|------------|
-| ~20 phút | 300 | Khá |
-| ~1 giờ | 800 | Tốt |
-| ~2-3 giờ | 2000 | Rất tốt |
-
-## Cách thêm AI của bạn
-
-### Bước 1: Copy template
-
-```bash
-cp template_ai.py member1_ga_ai.py    # Thành viên 1: GA
-cp template_ai.py member2_pso_ai.py   # Thành viên 2: PSO
-cp template_ai.py member3_dqn_ai.py   # Thành viên 3: tham khảo dqn/
-```
-
-### Bước 2: Implement 3 hàm bắt buộc
+### 2. Implement 3 hàm bắt buộc
 
 ```python
 from shared.base_ai import BaseDinoAI
 import numpy as np
 
 class MyAI(BaseDinoAI):
-
     def __init__(self):
-        super().__init__(name="Tên AI của tôi")
+        super().__init__(name="MyAI")
 
     def predict(self, state: np.ndarray) -> int:
-        """
-        Nhận state vector (16 chiều) → trả về action.
-        Action: 0 = duck, 1 = jump, 2 = run
-        """
-        return 2  # TODO: forward pass của model bạn
+        """state: 12D vector → action: 0=duck, 1=jump, 2=run"""
+        return 2
 
     def train(self, **kwargs):
-        """Huấn luyện model (GA/PSO/DQN)."""
         pass
 
     def save_model(self, path: str):
-        """Lưu model ra file."""
         pass
 
     def load_model(self, path: str):
-        """(Tuỳ chọn) Tải model từ file."""
         pass
 ```
 
-### Bước 3: Đăng ký AI vào main.py
+### 3. Test
 
 ```python
-from member1_ga_ai  import GeneticAlgorithmAI
-from member2_pso_ai import PSODinoAI
-from dqn.dqn_ai     import DQNDinoAI
-
-ais = [GeneticAlgorithmAI(), PSODinoAI(), DQNDinoAI()]
-```
-
-## Gợi ý triển khai từng thuật toán
-
-### Genetic Algorithm (GA)
-- Mỗi cá thể = 1 bộ trọng số neural network (w1, b1, w2, b2)
-- Fitness = `fitness_single()` chạy 3 lần lấy trung bình
-- Selection: tournament hoặc roulette wheel
-- Crossover: uniform hoặc single-point
-- Mutation: thêm nhiễu Gaussian nhỏ
-
-### Particle Swarm Optimization (PSO)
-- Mỗi particle = 1 bộ trọng số
-- Velocity cập nhật theo `p_best` và `g_best`
-- Fitness = `fitness_single()`
-- Nên chạy ít nhất 50-100 thế hệ
-
-### Deep Q-Network (DQN)
-- Đã cài đặt sẵn trong `dqn/` — xem `dqn/dqn_ai.py`
-- Double DQN + Soft Target Update + Huber Loss
-- Có thể điều chỉnh tham số trong `DQN_CONFIG`
-
-## Testing AI của bạn
-
-```bash
-# Chạy file AI riêng để test nhanh
-python member1_ga_ai.py
-
-# Hoặc trong code:
 if __name__ == "__main__":
     from shared.evaluator import evaluate, watch_ai
     ai = MyAI()
-    ai.load_model("models/my_model.npz")
-    evaluate(ai, n_runs=10)   # đánh giá 10 lần
-    watch_ai(ai, n_games=3)   # xem AI chơi 3 ván
+    evaluate(ai, n_runs=10)   # Đánh giá 10 lần
+    watch_ai(ai, n_games=3)   # Xem AI chơi
 ```
-
-## Cấu hình game
-
-Chỉnh trong `shared/config.py`:
-
-| Tham số | Giá trị | Ý nghĩa |
-|---------|---------|---------|
-| `SCREEN_W/H` | 1200×450 | Kích thước màn hình |
-| `FPS` | 60 | Khung hình/giây |
-| `INIT_SPEED` | 6.0 | Tốc độ ban đầu |
-| `MAX_SPEED` | 16.0 | Tốc độ tối đa |
-| `SPEED_INCREMENT` | 0.005 | Tăng tốc mỗi frame |
-| `GRAVITY` | 1.1 | Trọng lực (px/frame²) |
-| `JUMP_VEL` | 18.5 | Vận tốc nhảy (px/frame) |
-| `DINO_SCALE` | 0.45 | Tỉ lệ khủng long |
-| `OBSTACLE_SCALE` | 0.80 | Tỉ lệ xương rồng |
-| `BIRD_SCALE` | 0.70 | Tỉ lệ chim |
-
-## Lưu ý
-
-- **Không sửa file trong `shared/`** khi chưa thống nhất với nhóm
-- File AI của mỗi người implement `predict()`, `train()`, `save_model()`
-- Model lưu vào thư mục `models/` (tự tạo)
-- DQN cần PyTorch — cài thêm: `pip install torch`
-- Train trên Kaggle GPU T4 miễn phí nếu máy không có GPU
