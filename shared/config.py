@@ -59,7 +59,7 @@ JUMP_VEL = 18.5    # px/frame  — clearance ~148px
 
 # ─── Tốc độ game ──────────────────────────────────────────
 INIT_SPEED      = 6.0
-SPEED_INCREMENT = 0.005   # tăng nhanh hơn 5x
+SPEED_INCREMENT = 0.005
 MAX_SPEED       = 16.0
 
 # ─── Chướng ngại vật (kích thước tham khảo – sau scale) ───
@@ -74,9 +74,17 @@ BIRD_W = 64   # sau BIRD_SCALE=0.70
 BIRD_H = 56
 
 # ─── State / Action ───────────────────────────────────────
-# 12 = 2 obstacles × 5 features + 1 speed + 1 pad
-#   per obstacle: [dist, height, width, is_bird, bird_height]
-STATE_SIZE  = 12
+# 13D: 1 cụm obstacle × 5 + bird_x + jump_safety + bird_high + speed + 4 dino state
+#   [0-4]   cụm: dist, total_width, max_height, has_bird, bird_y
+#   [5]     bird_x / SCREEN_W
+#   [6]     jump_safety
+#   [7]     bird_high: 1.0 nếu chim cao (nên cúi), 0 nếu ko
+#   [8]     game_speed / MAX_SPEED
+#   [9]     dino_y / ground_y
+#   [10]    dino_vel_y / jump_vel
+#   [11]    is_jumping (0/1)
+#   [12]    is_ducking (0/1)
+STATE_SIZE  = 13
 ACTION_SIZE = 3
 
 # ─── Training ─────────────────────────────────────────────

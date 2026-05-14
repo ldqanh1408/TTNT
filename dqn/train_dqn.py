@@ -198,8 +198,8 @@ def train_from_scratch():
     ai = DQNDinoAI()
 
     scores = ai.train(
-        n_episodes       = 800,
-        max_steps_per_ep = 8_000,
+        n_episodes       = 2000,
+        max_steps_per_ep = 10_000,
         verbose_every    = 50,
         save_path        = MODEL_PATH,
     )
