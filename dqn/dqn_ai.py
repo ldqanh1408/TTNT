@@ -7,14 +7,17 @@
 #    DuelingQNetwork        – mạng dueling: tách value & advantage
 #    DQNDinoAI              – lớp AI chính, kế thừa BaseDinoAI
 #
-#  State (13 chiều):
-#    [0-3]   obs1: dist, height, is_bird, bird_y
-#    [4-7]   obs2: dist, height, is_bird, bird_y
-#    [8]     game_speed / MAX_SPEED
-#    [9]     is_jumping (0/1)
-#    [10]    is_ducking (0/1)
-#    [11]    jump_safety: nhảy bây giờ có clear obs1?
-#    [12]    dino vel_y / JUMP_VEL (âm=lên, dương=xuống)
+#  State (15 chiều):
+#    [0-4]   obs1: time_to_obs, height, width, is_bird, action_hint
+#    [5-9]   obs2: time_to_obs, height, width, is_bird, action_hint
+#    [10]    game_speed / MAX_SPEED
+#    [11]    is_jumping (0/1)
+#    [12]    is_ducking (0/1)
+#    [13]    remaining_airtime: thời gian còn lại trên không / jump_dur
+#    [14]    dino vel_y / JUMP_VEL (âm=lên, dương=xuống)
+#
+#  width (obs *2): phân biệt cactus_small (w26) vs cactus_double (w54) —
+#  2 loại cùng height=56, thiếu width agent nhảy giống nhau → chết ở cây rộng.
 #
 #  Action:
 #    0 = cúi (duck)
@@ -40,10 +43,10 @@ from shared.base_ai import BaseDinoAI
 #  Cấu hình DQN
 # ──────────────────────────────────────────────────────────
 DQN_CONFIG = {
-    # Mạng: Dueling 13→256→128 → [Value: 64→1, Advantage: 64→3]
+    # Mạng: Dueling 15→256→128 → [Value: 64→1, Advantage: 64→3]
     "hidden_sizes"      : [256, 128],
     "advantage_hidden"  : 64,
-    "state_size"        : 13,
+    "state_size"        : 15,
     "action_size"       : 3,
 
     # Prioritized Experience Replay
@@ -55,25 +58,26 @@ DQN_CONFIG = {
     "per_epsilon"       : 1e-6,
 
     # Training
-    "batch_size"        : 256,
+    "batch_size"        : 512,       # 256 → 512: batch lớn hơn = gradient ổn hơn
     "learn_start"       : 10_000,
-    "lr"                : 1e-4,
-    "lr_decay"          : 0.9999,
+    "lr"                : 3e-4,      # 1e-4 → 3e-4: LR cao hơn vì decay đã sửa
+    "lr_decay"          : 0.9999990, # BUG FIX: 0.9999 → 0.9999990 (sau 200k steps: 0.82x, không về 0)
+    "min_lr"            : 5e-5,      # sàn LR để không bao giờ về 0
     "gamma"             : 0.99,
-    "tau"               : 0.005,
-    "grad_clip"         : 10.0,
+    "tau"               : 0.003,     # 0.005 → 0.003: target update chậm hơn = ổn định hơn
+    "grad_clip"         : 5.0,       # 10.0 → 5.0: kiểm soát gradient tốt hơn
     "dropout"           : 0.0,
 
     # Exploration
     "eps_start"         : 1.0,
-    "eps_decay"         : 0.995,
-    "eps_end"           : 0.02,
-    "eps_end_episode"   : 1200,
+    "eps_decay"         : 0.9960,    # 0.995 → 0.9960: chậm hơn, đạt eps_end ~ep 1150
+    "eps_end"           : 0.01,      # 0.02 → 0.01: khám phá ít hơn ở giai đoạn cuối
+    "eps_end_episode"   : 1500,      # 1200 → 1500: cho thêm thời gian khám phá
 
     # Misc
     "target_update_freq": 2000,
     "use_soft_update"   : True,
-    "learn_every"       : 2,
+    "learn_every"       : 4,         # 2 → 4: pair với batch_size 512, cùng throughput
 }
 
 
@@ -379,8 +383,9 @@ class DQNDinoAI(BaseDinoAI):
                                   self.q_net.parameters()):
                     tp.data.lerp_(op.data, tau)
 
-        # LR decay theo step
-        lr_scale = self.cfg["lr_decay"] ** self.steps
+        # LR decay theo step, có sàn min_lr để không về 0
+        min_lr = self.cfg.get("min_lr", 5e-5)
+        lr_scale = max(min_lr / self.cfg["lr"], self.cfg["lr_decay"] ** self.steps)
         for param_group in self.optimizer.param_groups:
             param_group['lr'] = self.cfg["lr"] * lr_scale
 
@@ -402,6 +407,7 @@ class DQNDinoAI(BaseDinoAI):
 
         from shared.game_env import DinoEnv, Dinosaur
         from shared.spawn_policy import AdaptiveSpawnPolicy
+        from shared.config import INIT_SPEED, MAX_SPEED
 
         policy = AdaptiveSpawnPolicy(max_episodes=n_episodes)
 
@@ -429,7 +435,21 @@ class DQNDinoAI(BaseDinoAI):
             policy.set_episode(ep)
             env   = DinoEnv(render=False, spawn_policy=policy)
             dino  = Dinosaur(env.sprites)
-            state = env.reset(dino)
+
+            # ── Speed-range coverage ──────────────────────────────
+            # Episode bình thường kết thúc khi dino chết ở speed ~12, nên
+            # buffer gần như không có transition tốc độ cao → Q-net chưa từng
+            # học vùng đó → "phản ứng không kịp khi tốc độ tăng dần".
+            # 50% episode bắt đầu ở tốc độ ngẫu nhiên trên toàn dải để nạp
+            # thẳng transition tốc độ cao vào buffer. Các episode này chỉ dùng
+            # để phủ state-space — KHÔNG tính vào logging/curriculum/best.
+            if random.random() < 0.5:
+                start_speed = random.uniform(INIT_SPEED, MAX_SPEED)
+                randomized  = True
+            else:
+                start_speed = None
+                randomized  = False
+            state = env.reset(dino, start_speed=start_speed)
 
             ep_reward = 0
             for _ in range(max_steps_per_ep):
@@ -459,16 +479,19 @@ class DQNDinoAI(BaseDinoAI):
                 self.epsilon = self.cfg["eps_end"]
 
             ep_score = info["points"]
-            score_history.append(ep_score)
             self.generation = ep
 
-            # Adaptive policy: cập nhật performance sau mỗi episode
-            policy.update_performance(ep_score)
+            # Episode random-start chỉ để phủ dải tốc độ — điểm của nó thấp
+            # giả tạo (bắt đầu giữa game) nên không đưa vào logging, không
+            # dùng điều khiển curriculum, và không tính best score.
+            if not randomized:
+                score_history.append(ep_score)
+                policy.update_performance(ep_score)
 
-            if ep_score > best_score:
-                best_score      = ep_score
-                self.best_score = best_score
-                self.save_model(save_path)
+                if ep_score > best_score:
+                    best_score      = ep_score
+                    self.best_score = best_score
+                    self.save_model(save_path)
 
             if ep % verbose_every == 0:
                 recent    = score_history[-verbose_every:]

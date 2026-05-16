@@ -53,32 +53,37 @@ def _build_state(self, dino):
 
 ### 1.2. Bảng tham chiếu index
 
-#### Obstacle features (indices 0-7)
+#### Obstacle features (indices 0-9)
 
-Hai obstacle gần nhất, sắp xếp theo `x` tăng dần. Mỗi obstacle 4 feature:
+Hai obstacle gần nhất, sắp xếp theo `x` tăng dần. Mỗi obstacle 5 feature:
 
 | Block | Index | Feature | Công thức | Khoảng giá trị | Ý nghĩa |
 |---|---|---|---|---|---|
-| **obs1** | 0 | `dist` | `max(0, min(1, (ob.x - ref_x) / 1200))` | 0.0 … 1.0 | 0 = đè dino, 1 = xa nhất màn hình |
+| **obs1** | 0 | `time_to_obs` | `min(1, (dist_px / game_speed) / 60)` | 0.0 … 1.0 | Số frame tới obstacle / 60 (nhận biết theo tốc độ) |
 | | 1 | `height` | `min(1.0, ob.h / 160)` | 0.0 … 1.0 | Chiều cao obstacle / 160px |
-| | 2 | `is_bird` | `1.0 if ob.type_ == "bird" else 0.0` | 0 hoặc 1 | 1 = ptera (chim), 0 = xương rồng |
-| | 3 | `bird_y` | `ob.y / max(ground_y, 1)` | 0.0 … 1.0 | Vị trí dọc chim / ground_y (0 nếu ko phải chim) |
-| **obs2** | 4-7 | — | Giống obs1 | — | Obstacle thứ hai (toàn 0 nếu không có) |
+| | 2 | `width` | `min(1.0, ob.w / 100)` | 0.0 … 1.0 | Chiều **rộng** obstacle / 100px — phân biệt small/double/big |
+| | 3 | `is_bird` | `1.0 if ob.type_ == "bird" else 0.0` | 0 hoặc 1 | 1 = ptera (chim), 0 = xương rồng |
+| | 4 | `action_hint` | `0.0` / `0.5` / `1.0` | {0, 0.5, 1} | 0 = NHẢY, 0.5 = CÚI, 1 = CHẠY QUA |
+| **obs2** | 5-9 | — | Giống obs1 | — | Obstacle thứ hai (toàn 0 nếu không có) |
 
-#### Game state (indices 8-11)
+> `width` là feature thêm vào (state 13D → 15D): `cactus_small` (w≈26) và
+> `cactus_double` (w≈54) **cùng height≈56** nên nếu thiếu width agent coi 2 loại
+> như nhau, nhảy cùng kiểu → chết ở cây rộng / cụm xương rồng.
 
-| Index | Feature | Công thức | Khoảng giá trị | Ý nghĩa |
-|---|---|---|---|---|
-| 8 | `speed` | `game_speed / MAX_SPEED` | 6/32=0.19 … 1.0 | Tốc độ hiện tại / 32 |
-| 9 | `is_jumping` | `1.0 if dino.is_jumping else 0.0` | 0 hoặc 1 | Dino đang trong jump arc |
-| 10 | `is_ducking` | `1.0 if dino.is_ducking else 0.0` | 0 hoặc 1 | Dino đang cúi |
-| 11 | `jump_safety` | `max(0, min(1, (jump_dur - t) / jump_dur))` | 0.0 … 1.0 | 1 = nhảy bây giờ sẽ qua được obs1 |
-
-#### Dino vertical velocity (index 12)
+#### Game state (indices 10-13)
 
 | Index | Feature | Công thức | Khoảng giá trị | Ý nghĩa |
 |---|---|---|---|---|
-| 12 | `vel_y` | `dino._vel_y / JUMP_VEL` | -1.0 … 1.0 | Âm = đang bay lên, dương = đang rơi, 0 = đứng đất |
+| 10 | `speed` | `game_speed / MAX_SPEED` | 6/20=0.30 … 1.0 | Tốc độ hiện tại / 20 |
+| 11 | `is_jumping` | `1.0 if dino.is_jumping else 0.0` | 0 hoặc 1 | Dino đang trong jump arc |
+| 12 | `is_ducking` | `1.0 if dino.is_ducking else 0.0` | 0 hoặc 1 | Dino đang cúi |
+| 13 | `remaining_airtime` | `min(1, max(0, t_land / jump_dur))` | 0.0 … 1.0 | Thời gian còn lại trên không / chu kỳ nhảy |
+
+#### Dino vertical velocity (index 14)
+
+| Index | Feature | Công thức | Khoảng giá trị | Ý nghĩa |
+|---|---|---|---|---|
+| 14 | `vel_y` | `dino._vel_y / JUMP_VEL` | -1.0 … 1.0 | Âm = đang bay lên, dương = đang rơi, 0 = đứng đất |
 
 ### 1.3. Jump safety chi tiết
 
@@ -313,7 +318,7 @@ After `eps_end_episode=1200`, epsilon is locked at 0.02 for the remaining episod
 | `JUMP_VEL` | 18.5 | Initial jump velocity (px/frame) |
 | `INIT_SPEED` | 6.0 | Starting game speed |
 | `SPEED_INCREMENT` | 0.008 | Speed increase per frame |
-| `MAX_SPEED` | 32.0 | Maximum game speed |
+| `MAX_SPEED` | 20.0 | Maximum game speed (cap để giữ game vượt được ở score cao) |
 | `DINO_SCALE` | 0.45 | Dino sprite scaling |
 | `OBSTACLE_SCALE` | 0.80 | Cactus sprite scaling |
 | `BIRD_SCALE` | 0.70 | Ptera sprite scaling |

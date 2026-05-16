@@ -60,7 +60,20 @@ JUMP_VEL = 18.5    # px/frame  — clearance ~148px
 # ─── Tốc độ game ──────────────────────────────────────────
 INIT_SPEED      = 6.0
 SPEED_INCREMENT = 0.008   # nhanh hơn → ép AI thích nghi
-MAX_SPEED       = 32.0
+# MAX_SPEED 32 → 20:
+#   Obstacle spawn ở x≈1220, dino ở x≈80 → quãng spawn→dino = 1140px.
+#   1 chu kỳ nhảy T = 2*JUMP_VEL/GRAVITY ≈ 33.6 frame → jump_px = T*speed.
+#   speed 32: jump_px=1075px → cửa sổ phản ứng cho obstacle đầu nhóm chỉ còn
+#             (1140-1075)/32 ≈ 2 frame → bất khả thi (đây là "tường" score 400-500).
+#   speed 20: jump_px=672px  → cửa sổ (1140-672)/20 ≈ 23 frame → khó nhưng vượt được.
+MAX_SPEED       = 20.0
+
+# ─── Tính điểm (chuẩn Chrome Dino) ────────────────────────
+# Điểm tính theo QUÃNG ĐƯỜNG đã chạy, không phải số frame cố định: mỗi frame
+# cộng game_speed / SCORE_DISTANCE điểm. Tốc độ càng cao → điểm tăng càng nhanh.
+# SCORE_DISTANCE = 42 hiệu chỉnh để ở INIT_SPEED=6 nhịp điểm = +1 mỗi 7 frame
+# (6 px/frame × 7 = 42 px) — giữ nguyên cảm giác đầu game so với bản cũ.
+SCORE_DISTANCE  = 42.0
 
 # ─── Chướng ngại vật (kích thước tham khảo – sau scale) ───
 # Giá trị này chỉ dùng để tham khảo / fallback; kích thước thật
@@ -74,15 +87,21 @@ BIRD_W = 64   # sau BIRD_SCALE=0.70
 BIRD_H = 56
 
 # ─── State / Action ───────────────────────────────────────
-# 13D: 2 obstacles × 4 + speed + 2 dino + jump_safety + vel_y
-#   [0-3]   obs1: dist, height, is_bird, bird_y
-#   [4-7]   obs2: dist, height, is_bird, bird_y
-#   [8]     game_speed / MAX_SPEED
-#   [9]     is_jumping (0/1)
-#   [10]    is_ducking (0/1)
-#   [11]    jump_safety (obs1)
-#   [12]    dino.vel_y / JUMP_VEL (âm=lên, dương=xuống, 0 nếu ko nhảy)
-STATE_SIZE  = 13
+# 15D: 2 obstacles × 5 + speed + 2 dino + remaining_airtime + vel_y
+#   [0-4]   obs1: time_to_obs, height, width, is_bird, action_hint
+#   [5-9]   obs2: time_to_obs, height, width, is_bird, action_hint
+#   [10]    game_speed / MAX_SPEED
+#   [11]    is_jumping (0/1)
+#   [12]    is_ducking (0/1)
+#   [13]    remaining_airtime (thời gian còn lại trên không / jump_dur)
+#   [14]    dino.vel_y / JUMP_VEL (âm=lên, dương=xuống, 0 nếu ko nhảy)
+#
+# WIDTH (index 2 & 7) — feature MỚI, lý do thêm:
+#   cactus_small  w=26  h=56
+#   cactus_double w=54  h=56   ← CÙNG height với small!
+#   Thiếu width → small & double giống hệt nhau trong state → agent nhảy cùng
+#   kiểu cho mọi cây → chết ở cactus đôi/cụm vì cây rộng cần canh nhảy khác.
+STATE_SIZE  = 15
 ACTION_SIZE = 3
 
 # ─── Training ─────────────────────────────────────────────

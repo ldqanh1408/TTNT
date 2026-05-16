@@ -27,17 +27,19 @@ class SpawnConfig:
     ptera_prob_low:   float = 0.10
     ptera_prob_mid:   float = 0.15
     ptera_prob_high:  float = 0.20
-    ptera_prob_vhigh: float = 0.25   # FIX: thêm vào – LearnableSpawnPolicy cần
+    ptera_prob_vhigh: float = 0.25   # LearnableSpawnPolicy cần
 
-    # Gap pixel giữa các nhóm (lo, hi)
-    gap_slow:  tuple = (500, 800)
-    gap_mid:   tuple = (400, 650)
-    gap_fast:  tuple = (330, 520)
-    gap_vfast: tuple = (260, 450)
-    gap_max:   tuple = (200, 360)    # FIX: thêm vào – LearnableSpawnPolicy cần
+    # Gap pixel giữa các nhóm obstacle (lo, hi)
+    # TĂNG theo speed: speed thấp → gap nhỏ (nhiều obstacle/s), speed cao → gap lớn (có thời gian phản ứng)
+    gap_slow:  tuple = (250, 420)    # speed <=8:  gap nhỏ, dày obstacle
+    gap_mid:   tuple = (320, 500)    # speed 8-12
+    gap_fast:  tuple = (480, 700)    # speed 12-18
+    gap_vfast: tuple = (650, 900)    # speed 18-24
+    gap_max:   tuple = (800, 1200)   # speed >24:  gap lớn, đủ thời gian phản ứng
 
     # Bird height weights [low, mid, high]
-    bird_height_w: list = field(default_factory=lambda: [30, 45, 25])
+    # low = phải nhảy, mid = nhảy hoặc cúi, high = phải cúi
+    bird_height_w: list = field(default_factory=lambda: [35, 35, 30])
 
     # Pattern weights — ưu tiên single, hạn chế pattern phức tạp
     pattern_w_slow:  list = field(default_factory=lambda: [90, 10,  0,  0,  0,  0])
@@ -45,25 +47,25 @@ class SpawnConfig:
     pattern_w_fast:  list = field(default_factory=lambda: [40, 35,  5, 15,  5,  0])
     pattern_w_vfast: list = field(default_factory=lambda: [25, 35, 10, 20,  5,  5])
 
-    # FIX: Cactus size weights [small, big, double] theo dải speed
+    # Cactus size weights [small, big, double] theo dải speed
     # Slow → chủ yếu small, dễ nhảy; Fast → big/double nhiều hơn, khó hơn
     cactus_size_w_slow:  list = field(default_factory=lambda: [60, 30, 10])
     cactus_size_w_mid:   list = field(default_factory=lambda: [45, 35, 20])
     cactus_size_w_fast:  list = field(default_factory=lambda: [30, 40, 30])
     cactus_size_w_vfast: list = field(default_factory=lambda: [20, 45, 35])
 
-    # FIX: cluster_w_* cho decide_cactus_cluster (deprecated, dùng pattern system)
+    # cluster_w_* cho decide_cactus_cluster (deprecated, dùng pattern system)
     # Giữ lại để không break LearnableSpawnPolicy._apply_curriculum
     cluster_w_slow:  list = field(default_factory=lambda: [60, 40,  0, 0])
     cluster_w_mid:   list = field(default_factory=lambda: [50, 40, 10, 0])
     cluster_w_fast:  list = field(default_factory=lambda: [35, 35, 20, 10])
 
-    # Số frame phản ứng tối thiểu giữa các cactus trong chain pattern
-    # (ít frame → khó hơn → nên GIẢM theo speed, không phải tăng)
-    chain_react_frames_slow:  int = 7
+    # Số frame phản ứng giữa các cactus trong chain pattern
+    # TĂNG theo speed: speed thấp → ít frame (gap nhỏ), speed cao → nhiều frame (gap lớn)
+    chain_react_frames_slow:  int = 3   # speed thấp → nhiều frame, chuỗi dễ hơn
     chain_react_frames_mid:   int = 5
-    chain_react_frames_fast:  int = 4
-    chain_react_frames_vfast: int = 3
+    chain_react_frames_fast:  int = 7
+    chain_react_frames_vfast: int = 9   # speed cao → ít frame, chuỗi khó hơn
 
 
 _PATTERN_NAMES: list[PatternName] = [
@@ -92,6 +94,9 @@ class SpawnPolicy:
         points: int,
     ) -> Literal["ptera", "cactus"]:
         cfg = self.config
+        # Không spawn chim trước score ~100 (≈ 700 frames)
+        if points < 700:
+            return "cactus"
         # Không spawn 2 chim liên tiếp
         if last_type == "ptera":
             return "cactus"
@@ -153,8 +158,8 @@ class SpawnPolicy:
     # ── 5. Số frame reaction giữa các cactus trong chain ──────
     def decide_chain_react_frames(self, game_speed: float) -> int:
         """
-        FIX: react_frames GIẢM theo speed (khó hơn ở tốc độ cao).
-        Trước đây bị ngược: slow=2, vfast=7 → chain dễ hơn ở tốc độ cao!
+        react_frames TĂNG theo speed: slow=3, vfast=9.
+        Speed thấp → ít frame (gap nhỏ); speed cao → nhiều frame (gap lớn, đủ thở).
         """
         cfg = self.config
         if game_speed <= 8:
@@ -172,18 +177,36 @@ class SpawnPolicy:
         ground_top: int,
         bird_h: int,
         force: Literal["low", "mid", "high", "any"] = "any",
+        game_speed: float = 8.0,
     ) -> int:
+        """
+        Bird height tính từ ground_top (y của mặt đất). ground_top = 430.
+
+        low:  ground_top - bird_h - 10   → bird bottom 10px trên mặt đất
+              Dino đứng va chạm, Dino cúi cũng va chạm → phải NHẢY
+
+        mid:  ground_top - bird_h - 50   → bird bottom 50px trên mặt đất
+              Dino đứng va chạm (eff_bottom 369 > eff_top 362);
+              Dino cúi lọt qua (eff_top 378 > eff_bottom 369) → phải CÚI
+
+        high: ground_top - bird_h - 120  → bird bottom 120px trên mặt đất
+              Dino đứng/cúi an toàn; Dino đang nhảy sẽ va chạm → KHÔNG được nhảy
+        """
         heights = {
             "low":  ground_top - bird_h - 10,
-            "mid":  ground_top - bird_h - 55,
-            "high": ground_top - bird_h - 110,
+            "mid":  ground_top - bird_h - 50,
+            "high": ground_top - bird_h - 120,
         }
         if force != "any":
             return heights[force]
-        choice = random.choices(
-            ["low", "mid", "high"],
-            weights=self.config.bird_height_w,
-        )[0]
+        # Speed thấp → ưu tiên low bird (phải nhảy), quen dần với mid/high sau
+        if game_speed <= 8:
+            w = [55, 30, 15]
+        elif game_speed <= 14:
+            w = [40, 35, 25]
+        else:
+            w = self.config.bird_height_w
+        choice = random.choices(["low", "mid", "high"], weights=w)[0]
         return heights[choice]
 
     # ── 7. (Deprecated) Cluster size ──────────────────────────
@@ -355,11 +378,17 @@ class AdaptiveSpawnPolicy(SpawnPolicy):
         # Base curriculum: power curve 1.3 → dễ ở đầu, tăng tốc ở cuối
         base_difficulty = progress ** 1.3
 
-        # Target không giảm dưới base (curriculum là sàn tối thiểu)
-        self._target_difficulty = max(base_difficulty, self._target_difficulty)
+        # Soft floor = 40% của base (cho phép difficulty thực sự giảm khi agent struggling)
+        # BUG FIX: sàn cứng = full base_difficulty lock difficulty tăng dù score avg chỉ 25-30
+        # Ví dụ ep 950: avg=62, target muốn giảm xuống 0.33, nhưng base=0.41 → max(0.41,0.33)=0.41
+        # → difficulty tiếp tục tăng → catastrophic forgetting từ ep 850 trở đi
+        curriculum_floor = base_difficulty * 0.4
+        self._target_difficulty = max(curriculum_floor, self._target_difficulty)
 
-        # P-controller: smooth approach to target (hệ số 0.2)
-        self._difficulty += 0.2 * (self._target_difficulty - self._difficulty)
+        # Asymmetric P-controller: giảm nhanh (0.35) khi agent struggling, tăng chậm (0.15)
+        error = self._target_difficulty - self._difficulty
+        gain  = 0.35 if error < 0 else 0.15
+        self._difficulty += gain * error
         self._difficulty = max(0.0, min(1.0, self._difficulty))
 
         self._apply_curriculum()
@@ -382,16 +411,23 @@ class AdaptiveSpawnPolicy(SpawnPolicy):
 
         avg = np.mean(self.score_window)
 
-        if avg < 50:
-            self._target_difficulty = max(0.05, self._difficulty - 0.10)
+        # Ngưỡng score đã nhân ~2x so với bản cũ (30/50/100/200/400/700).
+        # Lý do: điểm giờ tính theo quãng đường (game_speed/SCORE_DISTANCE mỗi
+        # frame) nên cùng một độ-sống-sót sẽ cho điểm cao hơn ~1.6-2.4x so với
+        # cách cũ (+1/7 frame). Không scale ngưỡng → curriculum tưởng agent giỏi
+        # hơn thực tế → đẩy difficulty quá nhanh, mất ổn định.
+        if avg < 60:
+            self._target_difficulty = max(0.03, self._difficulty - 0.18)   # agent thực sự gặp khó → giảm mạnh
         elif avg < 100:
-            self._target_difficulty = max(0.10, self._difficulty - 0.05)
-        elif avg < 250:
-            self._target_difficulty = min(0.55, self._difficulty + 0.015)
-        elif avg < 500:
-            self._target_difficulty = min(0.75, self._difficulty + 0.025)
+            self._target_difficulty = max(0.05, self._difficulty - 0.12)   # struggling
+        elif avg < 200:
+            self._target_difficulty = max(0.08, self._difficulty - 0.06)   # dưới kỳ vọng
+        elif avg < 400:
+            self._target_difficulty = min(0.45, self._difficulty + 0.010)  # tiến bộ chậm → tăng nhẹ
         elif avg < 800:
-            self._target_difficulty = min(0.90, self._difficulty + 0.035)
+            self._target_difficulty = min(0.65, self._difficulty + 0.020)
+        elif avg < 1400:
+            self._target_difficulty = min(0.85, self._difficulty + 0.035)
         else:
             self._target_difficulty = min(1.0, self._difficulty + 0.05)
 
@@ -411,14 +447,15 @@ class AdaptiveSpawnPolicy(SpawnPolicy):
         cfg.ptera_prob_high  = min(0.50, 0.15 + d * 0.35)
         cfg.ptera_prob_vhigh = min(0.55, 0.20 + d * 0.35)
 
-        # Gap — thu hẹp theo power curve (ép mạnh ở cuối)
-        # Dùng d**1.2 để gap giảm chậm ở đầu, nhanh ở cuối
+        # Gap — multiplicative shrink từ baseline SpawnConfig
+        # d=0 → factor=1.0 (full gap); d=1 → factor=0.35 (tight but survivable)
         d_gap = d ** 1.2
-        cfg.gap_slow  = (int(550 - d_gap * 250), int(850 - d_gap * 400))
-        cfg.gap_mid   = (int(450 - d_gap * 200), int(700 - d_gap * 300))
-        cfg.gap_fast  = (int(380 - d_gap * 150), int(580 - d_gap * 250))
-        cfg.gap_vfast = (int(300 - d_gap * 120), int(500 - d_gap * 200))
-        cfg.gap_max   = (int(240 - d_gap * 100), int(400 - d_gap * 180))
+        gap_factor = max(0.35, 1.0 - d_gap * 0.65)
+        cfg.gap_slow  = (max(60,  int(180 * gap_factor)), max(100, int(320 * gap_factor)))
+        cfg.gap_mid   = (max(80,  int(320 * gap_factor)), max(120, int(500 * gap_factor)))
+        cfg.gap_fast  = (max(100, int(480 * gap_factor)), max(150, int(700 * gap_factor)))
+        cfg.gap_vfast = (max(120, int(650 * gap_factor)), max(180, int(900 * gap_factor)))
+        cfg.gap_max   = (max(150, int(800 * gap_factor)), max(200, int(1200 * gap_factor)))
 
         # Pattern weights — mở khóa pattern phức tạp dần
         if d < 0.25:
@@ -457,8 +494,8 @@ class AdaptiveSpawnPolicy(SpawnPolicy):
         mid_w  = max(5, 100 - low_w - high_w)
         cfg.bird_height_w = [low_w, mid_w, high_w]
 
-        # Chain react frames — chặt hơn ở difficulty cao
-        cfg.chain_react_frames_slow  = max(3, 8 - int(d * 4))
-        cfg.chain_react_frames_mid   = max(2, 6 - int(d * 3))
-        cfg.chain_react_frames_fast  = max(2, 5 - int(d * 3))
-        cfg.chain_react_frames_vfast = max(1, 4 - int(d * 2))
+        # Chain react frames — shrink nhẹ từ baseline (3,5,7,9)
+        cfg.chain_react_frames_slow  = max(2, int(3 * (1.0 - d * 0.3)))
+        cfg.chain_react_frames_mid   = max(3, int(5 * (1.0 - d * 0.3)))
+        cfg.chain_react_frames_fast  = max(4, int(7 * (1.0 - d * 0.3)))
+        cfg.chain_react_frames_vfast = max(5, int(9 * (1.0 - d * 0.3)))

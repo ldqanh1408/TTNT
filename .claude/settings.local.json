@@ -18,7 +18,8 @@
       "Bash(echo \"exit: $?\")",
       "mcp__plugin_everything-claude-code_sequential-thinking__sequentialthinking",
       "Bash(git checkout *)",
-      "Bash(omc ask *)"
+      "Bash(omc ask *)",
+      "Skill(agent-teams:team-review)"
     ]
   }
 }

@@ -96,15 +96,21 @@
   },
   "hotPaths": [
     {
-      "path": "dqn\\dqn_ai.py",
-      "accessCount": 9,
-      "lastAccessed": 1778777359362,
+      "path": "shared\\spawn_policy.py",
+      "accessCount": 21,
+      "lastAccessed": 1778781179097,
       "type": "file"
     },
     {
-      "path": "shared\\spawn_policy.py",
-      "accessCount": 8,
-      "lastAccessed": 1778777271893,
+      "path": "shared\\game_env.py",
+      "accessCount": 14,
+      "lastAccessed": 1778781179166,
+      "type": "file"
+    },
+    {
+      "path": "dqn\\dqn_ai.py",
+      "accessCount": 9,
+      "lastAccessed": 1778777359362,
       "type": "file"
     },
     {
@@ -118,12 +124,6 @@
       "accessCount": 5,
       "lastAccessed": 1778777130263,
       "type": "directory"
-    },
-    {
-      "path": "shared\\game_env.py",
-      "accessCount": 5,
-      "lastAccessed": 1778778712712,
-      "type": "file"
     },
     {
       "path": "shared\\config.py",

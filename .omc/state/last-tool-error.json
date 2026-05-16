@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "tool_input_preview": "{\"command\":\"python -c \\\"\\nimport sys\\nsys.path.insert(0, r'C:\\\\Users\\\\CYBORG\\\\PycharmProjects\\\\PythonProject')\\n\\nfrom shared.config import JUMP_VEL, GRAVITY, STATE_SIZE\\n\\n# Test 1: State size\\nasser...",
+  "error": "Exit code 1\nTraceback (most recent call last):\r\n  File \"<string>\", line 18, in <module>\r\n    print('Test 3: Sandwich pattern (jump\\u2192duck\\u2192jump) survivability:')\r\n    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\r\n  File \"C:\\Users\\CYBORG\\AppData\\Local\\Programs\\Python\\Python314\\Lib\\encodings\\cp1252.py\", line 19, in encode\r\n    return codecs.charmap_encode(input,self.errors,encoding_table)[0]\r\n           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\r\nUnicodeEnc...",
+  "timestamp": "2026-05-14T17:54:35.635Z",
+  "retry_count": 1
+}
