@@ -8,12 +8,15 @@ from typing import Literal
 
 
 PatternName = Literal[
-    "single",       # 1 cactus đơn
-    "chain2",       # 2 cactus gap sát → nhảy liên tiếp
-    "chain3",       # 3 cactus gap sát → nhảy 3 lần liên tiếp
-    "jump_duck",    # cactus → chim thấp/giữa  (nhảy rồi cúi)
-    "duck_jump",    # chim cao → cactus         (cúi rồi nhảy)
-    "sandwich",     # cactus → chim → cactus    (nhảy, cúi, nhảy)
+    "single",        # 1 cactus đơn
+    "chain2",        # 2 cactus gap sát → nhảy liên tiếp
+    "chain3",        # 3 cactus gap sát → nhảy 3 lần liên tiếp
+    "jump_duck",     # cactus → chim thấp/giữa  (nhảy rồi cúi)
+    "duck_jump",     # chim cao → cactus         (cúi rồi nhảy)
+    "sandwich",      # cactus → chim → cactus    (nhảy, cúi, nhảy)
+    "duck_stretch",  # cactus → dàn chim ngang → cactus (nhảy, CÚI LIÊN TỤC, nhảy)
+    "weave_stretch", # cactus → low→high→low birds → cactus (nhảy, chạy, nhảy)
+    "mixed_stretch", # cactus → random-height birds → cactus (thích ứng linh hoạt)
 ]
 
 CactusSize = Literal["small", "big", "double"]
@@ -24,10 +27,10 @@ CactusSize = Literal["small", "big", "double"]
 @dataclass
 class SpawnConfig:
     # Xác suất standalone bird (không tính pattern)
-    ptera_prob_low:   float = 0.10
-    ptera_prob_mid:   float = 0.15
-    ptera_prob_high:  float = 0.20
-    ptera_prob_vhigh: float = 0.25   # LearnableSpawnPolicy cần
+    ptera_prob_low:   float = 0.15
+    ptera_prob_mid:   float = 0.22
+    ptera_prob_high:  float = 0.30
+    ptera_prob_vhigh: float = 0.38   # LearnableSpawnPolicy cần
 
     # Gap pixel giữa các nhóm obstacle (lo, hi)
     # TĂNG theo speed: speed thấp → gap nhỏ (nhiều obstacle/s), speed cao → gap lớn (có thời gian phản ứng)
@@ -42,10 +45,10 @@ class SpawnConfig:
     bird_height_w: list = field(default_factory=lambda: [35, 35, 30])
 
     # Pattern weights — ưu tiên single, hạn chế pattern phức tạp
-    pattern_w_slow:  list = field(default_factory=lambda: [90, 10,  0,  0,  0,  0])
-    pattern_w_mid:   list = field(default_factory=lambda: [60, 30,  0, 10,  0,  0])
-    pattern_w_fast:  list = field(default_factory=lambda: [40, 35,  5, 15,  5,  0])
-    pattern_w_vfast: list = field(default_factory=lambda: [25, 35, 10, 20,  5,  5])
+    pattern_w_slow:  list = field(default_factory=lambda: [90, 10,  0,  0,  0,  0,  0,  0,  0])
+    pattern_w_mid:   list = field(default_factory=lambda: [60, 30,  0, 10,  0,  0,  0,  0,  0])
+    pattern_w_fast:  list = field(default_factory=lambda: [38, 35,  5, 12,  5,  0,  3,  3,  3])
+    pattern_w_vfast: list = field(default_factory=lambda: [22, 30, 10, 18,  5,  5,  5,  5,  5])
 
     # Cactus size weights [small, big, double] theo dải speed
     # Slow → chủ yếu small, dễ nhảy; Fast → big/double nhiều hơn, khó hơn
@@ -69,7 +72,8 @@ class SpawnConfig:
 
 
 _PATTERN_NAMES: list[PatternName] = [
-    "single", "chain2", "chain3", "jump_duck", "duck_jump", "sandwich"
+    "single", "chain2", "chain3", "jump_duck", "duck_jump", "sandwich",
+    "duck_stretch", "weave_stretch", "mixed_stretch",
 ]
 _CACTUS_SIZES: list[CactusSize] = ["small", "big", "double"]
 
@@ -209,6 +213,33 @@ class SpawnPolicy:
         choice = random.choices(["low", "mid", "high"], weights=w)[0]
         return heights[choice]
 
+    # ── 6b. Combo spawn cho chim bay ──────────────────────────
+    def decide_bird_combo(self, game_speed: float, points: int) -> str:
+        """Chọn kiểu spawn chim bay: 'single' | 'wall' | 'stream' | 'triple'.
+
+        - single : 1 con chim low/mid/high — biến thể cơ bản.
+        - wall   : TƯỜNG chim dọc 3 tầng — ÉP CÚI tức thời (đứng/nhảy đều chết,
+                   chỉ cúi mới sống).
+        - stream : ĐÀN NHỎ 2-3 con bay NGANG vùng DUCK — 4 sub-styles ngẫu nhiên:
+                   pair/trio/wide/rising, cúi là gọn nhất, luôn sống được.
+        - triple : 3 CON CHIM THẲNG HÀNG NGANG — cùng độ cao DUCK, dãn rộng px,
+                   tổng span >> clear zone → KHÔNG THỂ nhảy vượt, PHẢI cúi.
+
+        Curriculum: stream 500, triple 600, wall 900.
+        """
+        if points < 500:
+            return "single"
+        if points < 600:
+            return random.choices(["single", "stream"], weights=[40, 60])[0]
+        if points < 900:
+            return random.choices(["single", "stream", "triple"],
+                                  weights=[25, 40, 35])[0]
+        if game_speed <= 12:
+            return random.choices(["single", "wall", "stream", "triple"],
+                                  weights=[15, 30, 30, 25])[0]
+        return random.choices(["single", "wall", "stream", "triple"],
+                              weights=[12, 35, 28, 25])[0]
+
     # ── 7. (Deprecated) Cluster size ──────────────────────────
     def decide_cactus_cluster(self, game_speed: float) -> int:
         """
@@ -267,10 +298,10 @@ class LearnableSpawnPolicy(SpawnPolicy):
         cfg = self.config
 
         # Bird rate: tăng đều theo difficulty
-        cfg.ptera_prob_low   = 0.10 + d * 0.20
-        cfg.ptera_prob_mid   = 0.15 + d * 0.25
-        cfg.ptera_prob_high  = 0.20 + d * 0.25
-        cfg.ptera_prob_vhigh = 0.25 + d * 0.25   # FIX: field đã tồn tại
+        cfg.ptera_prob_low   = 0.15 + d * 0.30
+        cfg.ptera_prob_mid   = 0.22 + d * 0.33
+        cfg.ptera_prob_high  = 0.30 + d * 0.30
+        cfg.ptera_prob_vhigh = 0.38 + d * 0.27   # FIX: field đã tồn tại
 
         # Gap: thu hẹp dần theo difficulty
         cfg.gap_slow  = (int(500 - d * 200), int(800 - d * 350))
@@ -442,10 +473,10 @@ class AdaptiveSpawnPolicy(SpawnPolicy):
         cfg = self.config
 
         # Bird probability — tăng dần, mạnh hơn ở cuối
-        cfg.ptera_prob_low   = min(0.50, 0.08 + d * 0.42)
-        cfg.ptera_prob_mid   = min(0.55, 0.12 + d * 0.43)
-        cfg.ptera_prob_high  = min(0.50, 0.15 + d * 0.35)
-        cfg.ptera_prob_vhigh = min(0.55, 0.20 + d * 0.35)
+        cfg.ptera_prob_low   = min(0.60, 0.12 + d * 0.48)
+        cfg.ptera_prob_mid   = min(0.65, 0.18 + d * 0.47)
+        cfg.ptera_prob_high  = min(0.60, 0.22 + d * 0.38)
+        cfg.ptera_prob_vhigh = min(0.65, 0.28 + d * 0.37)
 
         # Gap — multiplicative shrink từ baseline SpawnConfig
         # d=0 → factor=1.0 (full gap); d=1 → factor=0.35 (tight but survivable)
@@ -459,25 +490,25 @@ class AdaptiveSpawnPolicy(SpawnPolicy):
 
         # Pattern weights — mở khóa pattern phức tạp dần
         if d < 0.25:
-            cfg.pattern_w_slow  = [95,  5,  0,  0,  0,  0]
-            cfg.pattern_w_mid   = [80, 15,  0,  5,  0,  0]
-            cfg.pattern_w_fast  = [60, 25,  5,  5,  5,  0]
-            cfg.pattern_w_vfast = [45, 30, 10,  5,  5,  5]
+            cfg.pattern_w_slow  = [95,  5,  0,  0,  0,  0,  0,  0,  0]
+            cfg.pattern_w_mid   = [80, 15,  0,  5,  0,  0,  0,  0,  0]
+            cfg.pattern_w_fast  = [60, 25,  5,  5,  5,  0,  0,  0,  0]
+            cfg.pattern_w_vfast = [45, 30, 10,  5,  5,  5,  0,  0,  0]
         elif d < 0.50:
-            cfg.pattern_w_slow  = [75, 20,  5,  0,  0,  0]
-            cfg.pattern_w_mid   = [50, 30, 10,  5,  5,  0]
-            cfg.pattern_w_fast  = [35, 30, 15,  8,  7,  5]
-            cfg.pattern_w_vfast = [25, 30, 20, 10,  8,  7]
+            cfg.pattern_w_slow  = [75, 20,  5,  0,  0,  0,  0,  0,  0]
+            cfg.pattern_w_mid   = [50, 30, 10,  5,  5,  0,  0,  0,  0]
+            cfg.pattern_w_fast  = [33, 28, 15,  8,  7,  5,  2,  2,  2]
+            cfg.pattern_w_vfast = [23, 28, 20, 10,  8,  7,  3,  3,  3]
         elif d < 0.75:
-            cfg.pattern_w_slow  = [55, 28, 10,  5,  2,  0]
-            cfg.pattern_w_mid   = [35, 28, 18, 10,  5,  4]
-            cfg.pattern_w_fast  = [20, 25, 22, 13, 10, 10]
-            cfg.pattern_w_vfast = [12, 22, 24, 15, 13, 14]
+            cfg.pattern_w_slow  = [55, 26,  8,  5,  2,  0,  2,  2,  2]
+            cfg.pattern_w_mid   = [33, 26, 18, 10,  5,  4,  5,  3,  3]
+            cfg.pattern_w_fast  = [18, 23, 20, 13, 10, 10,  6,  5,  5]
+            cfg.pattern_w_vfast = [10, 20, 22, 14, 12, 12,  9,  8,  8]
         else:
-            cfg.pattern_w_slow  = [40, 28, 15, 10,  5,  2]
-            cfg.pattern_w_mid   = [25, 25, 22, 13,  8,  7]
-            cfg.pattern_w_fast  = [12, 20, 24, 17, 14, 13]
-            cfg.pattern_w_vfast = [ 8, 16, 24, 18, 17, 17]
+            cfg.pattern_w_slow  = [38, 26, 15, 10,  5,  2,  3,  3,  3]
+            cfg.pattern_w_mid   = [23, 23, 20, 13,  8,  7,  6,  5,  5]
+            cfg.pattern_w_fast  = [10, 18, 22, 16, 13, 12, 10,  8,  8]
+            cfg.pattern_w_vfast = [ 6, 14, 20, 16, 15, 15, 12, 10, 10]
 
         # Cactus size — ép to hơn ở difficulty cao
         small_w  = max(10, int(60 - d * 40))

@@ -60,13 +60,13 @@ JUMP_VEL = 18.5    # px/frame  — clearance ~148px
 # ─── Tốc độ game ──────────────────────────────────────────
 INIT_SPEED      = 6.0
 SPEED_INCREMENT = 0.008   # nhanh hơn → ép AI thích nghi
-# MAX_SPEED 32 → 20:
+# MAX_SPEED = 30:
 #   Obstacle spawn ở x≈1220, dino ở x≈80 → quãng spawn→dino = 1140px.
 #   1 chu kỳ nhảy T = 2*JUMP_VEL/GRAVITY ≈ 33.6 frame → jump_px = T*speed.
-#   speed 32: jump_px=1075px → cửa sổ phản ứng cho obstacle đầu nhóm chỉ còn
-#             (1140-1075)/32 ≈ 2 frame → bất khả thi (đây là "tường" score 400-500).
+#   speed 30: jump_px=1009px → cửa sổ (1140-1009)/30 ≈ 4.4 frame → cực khó
+#             nhưng vẫn khả thi với AI đã thuần thục pattern phức tạp.
 #   speed 20: jump_px=672px  → cửa sổ (1140-672)/20 ≈ 23 frame → khó nhưng vượt được.
-MAX_SPEED       = 20.0
+MAX_SPEED       = 30.0
 
 # ─── Tính điểm (chuẩn Chrome Dino) ────────────────────────
 # Điểm tính theo QUÃNG ĐƯỜNG đã chạy, không phải số frame cố định: mỗi frame
