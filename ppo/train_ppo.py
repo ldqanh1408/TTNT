@@ -88,7 +88,7 @@ def plot_scores(scores: list, save_path: str = CHART_PATH):
 
 def train_from_scratch():
     ai = PPODinoAI()
-    scores = ai.train(n_episodes=2000, save_path=MODEL_PATH)
+    scores = ai.train(n_episodes=5000, save_path=MODEL_PATH)
     plot_scores(scores)
 
 def train_resume():
