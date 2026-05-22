@@ -1,11 +1,11 @@
 # train_ga.py  –  Huấn luyện Genetic Algorithm cho Chrome Dino
 # Cách chạy:
 #   python ga/train_ga.py               # train từ đầu (mặc định)
-#   python ga/train_ga.py --watch       # xem AI đã train chơi
-#   python ga/train_ga.py --resume      # tiếp tục train từ checkpoint
-#   python ga/train_ga.py --eval        # đánh giá không render
-#   python ga/train_ga.py --gen 300     # train N thế hệ
-#   python ga/train_ga.py --pop 50      # quần thể N cá thể
+#   python ga/train_ga.py --watch     # xem AI đã train chơi
+#   python ga/train_ga.py --resume    # tiếp tục train từ checkpoint
+#   python ga/train_ga.py --eval      # đánh giá không render
+#   python ga/train_ga.py --gen 300   # train N thế hệ
+#   python ga/train_ga.py --pop 80    # quần thể N cá thể
 
 import sys
 import os
@@ -58,7 +58,7 @@ class GADinoAI(BaseDinoAI):
         return self.best_network.predict(state)
 
     def train(self, n_generations: int = 300,
-              fitness_evals: int = 3,
+              fitness_evals: int = 5,
               verbose_every: int = 10,
               save_path: str = MODEL_PATH,
               **kwargs):
@@ -70,9 +70,10 @@ class GADinoAI(BaseDinoAI):
         print(f"  Fitness/Eval: {fitness_evals} lần chạy / cá thể")
         print(f"  Crossover  : {self.ga_cfg.CROSSOVER_RATE*100:.0f}%  (uniform)")
         print(f"  Mutation   : {self.ga_cfg.MUTATION_RATE*100:.0f}%  "
-              f"(gaussian, σ={self.ga_cfg.MUTATION_STRENGTH})")
+              f"(gaussian, σ={self.ga_cfg.MUTATION_STRENGTH}, adaptive)")
         print(f"  Elitism    : {self.ga_cfg.ELITISM_COUNT} cá thể")
-        print(f"  Selection  : tournament (k={self.ga_cfg.TOURNAMENT_SIZE})")
+        print(f"  Age Penalty: {self.ga_cfg.AGE_PENALTY*100:.2f}% / gen (sau gen 20)")
+        print(f"  Selection  : tournament (k={self.ga_cfg.TOURNAMENT_SIZE}) + age-penalty")
         print(f"  Network    : {self.nn_cfg.INPUT_SIZE}"
               f" → {self.nn_cfg.HIDDEN_SIZES}"
               f" → {self.nn_cfg.OUTPUT_SIZE}")
@@ -84,16 +85,19 @@ class GADinoAI(BaseDinoAI):
         self.ga.initialize_population()
 
         class _AIFitWrapper:
-            __slots__ = ("network",)
+            __slots__ = ("network", "net_input_size")
 
-            def __init__(self, individual: GenomeIndividual):
+            def __init__(self, individual: GenomeIndividual, net_size: int):
                 self.network = individual.network
+                self.net_input_size = net_size
 
             def predict(self, state):
+                if state.shape[-1] > self.net_input_size:
+                    state = state[..., :self.net_input_size]
                 return self.network.predict(state)
 
         def fitness_fn(individual: GenomeIndividual) -> float:
-            ai = _AIFitWrapper(individual)
+            ai = _AIFitWrapper(individual, self.nn_cfg.INPUT_SIZE)
             result = run_episode(ai, render=False, max_steps=MAX_STEPS_PER_EPISODE)
             return float(result["score"])
 
@@ -109,8 +113,8 @@ class GADinoAI(BaseDinoAI):
 
         t_elapsed = time.time() - t_start
         self.best_network = best.network.copy()
-        self.best_score  = best.fitness
-        self.generation  = best.age
+        self.best_score   = best.fitness
+        self.generation   = best.best_gen
 
         self._plot_history(save_path.replace(".pkl", "_curve.png"))
         self._print_final_stats(t_elapsed)
@@ -119,8 +123,12 @@ class GADinoAI(BaseDinoAI):
         if self.best_network is None:
             print(f"  [!] Chưa train – không có gì để lưu.")
             return
-        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-        self.best_network.save(path)
+        if self.ga is not None:
+            self.ga.inject_best(self.best_network, self.best_score, self.generation)
+            self.ga._save_best(path)
+        else:
+            os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+            self.best_network.save(path)
         print(f"  [{self.name}] Đã lưu model → {path}  "
               f"(fitness={self.best_score:.2f}, gen={self.generation})")
 
@@ -128,8 +136,16 @@ class GADinoAI(BaseDinoAI):
         if not os.path.exists(path):
             print(f"  [!] Không tìm thấy file: {path}")
             return
-        self.best_network = DinoNet.load(path)
-        print(f"  [{self.name}] Đã tải model ← {path}")
+        net, meta = GeneticAlgorithm.load_best(path)
+        self.best_network = net
+        self.nn_cfg      = NNConfig()
+        self.nn_cfg.INPUT_SIZE   = net.cfg.INPUT_SIZE
+        self.nn_cfg.HIDDEN_SIZES = net.cfg.HIDDEN_SIZES
+        self.nn_cfg.OUTPUT_SIZE  = net.cfg.OUTPUT_SIZE
+        self.best_score = meta["fitness"]
+        self.generation  = meta["best_gen"]
+        print(f"  [{self.name}] Đã tải model ← {path}  "
+              f"(fitness={self.best_score:.2f}, gen={self.generation})")
 
     def _plot_history(self, save_path: str = CHART_PATH):
         if self.ga is None or not self.ga.history:
@@ -138,7 +154,7 @@ class GADinoAI(BaseDinoAI):
         history = self.ga.history
         gens    = [h["generation"]    for h in history]
         bests   = [h["best_fitness"]  for h in history]
-        avgs    = [h["avg_fitness"]  for h in history]
+        avgs    = [h["avg_fitness"]   for h in history]
         worsts  = [h["worst_fitness"] for h in history]
 
         n = len(gens)
@@ -146,7 +162,7 @@ class GADinoAI(BaseDinoAI):
         if n >= window:
             bests_ma = np.convolve(bests, np.ones(window)/window, mode="valid")
             avgs_ma  = np.convolve(avgs,  np.ones(window)/window, mode="valid")
-            ma_x     = range(window - 1, n)
+            ma_x     = list(range(window - 1, n))
         else:
             bests_ma = bests
             avgs_ma  = avgs
@@ -224,13 +240,15 @@ class GADinoAI(BaseDinoAI):
             ax_bar.set_ylabel("Count")
             ax_bar.legend(fontsize=7, facecolor=BG, labelcolor=TEXT, framealpha=0.8)
 
+        best_gen = int(np.argmax(bests))
         stats_text = (
             f"Pop={self.ga_cfg.POPULATION_SIZE}  |  "
             f"Gens={n}  |  "
-            f"Best={max(bests):.0f}  |  "
+            f"Best={max(bests):.0f} (gen={best_gen})  |  "
             f"Final Avg={avgs[-1]:.1f}  |  "
-            f"Mutation={self.ga_cfg.MUTATION_RATE*100:.0f}%  |  "
-            f"σ={self.ga_cfg.MUTATION_STRENGTH}"
+            f"Mut={self.ga_cfg.MUTATION_RATE*100:.0f}%  "
+            f"σ={self.ga_cfg.MUTATION_STRENGTH}  "
+            f"FitEvals={self.ga_cfg.FITNESS_EVALS}"
         )
         fig.text(0.5, 0.01, stats_text, ha="center", fontsize=9, color="#74b9ff",
                  bbox=dict(boxstyle="round,pad=0.3", facecolor=BG, edgecolor=GRID))
@@ -243,17 +261,16 @@ class GADinoAI(BaseDinoAI):
     def _print_final_stats(self, elapsed: float):
         if self.ga is None or not self.ga.history:
             return
-        h     = self.ga.history
-        gens  = [x["generation"]     for x in h]
-        bests = [x["best_fitness"]   for x in h]
-        avgs  = [x["avg_fitness"]    for x in h]
+        h = self.ga.history
+        avgs = [x["avg_fitness"] for x in h]
 
         print(f"\n{'─'*60}")
         print(f"  TIẾN HOÁ HOÀN TẤT")
         print(f"  {'─'*60}")
         print(f"  Thời gian  : {elapsed/60:.1f} phút  ({elapsed:.1f}s)")
-        print(f"  Thế hệ    : {len(gens)}")
-        print(f"  Best Score: {max(bests):.0f}  (gen={gens[np.argmax(bests)]})")
+        print(f"  Thế hệ    : {len(h)}")
+        print(f"  Best Score: {self.ga.best_ever.fitness:.0f}  "
+              f"(gen={self.ga.best_ever.best_gen})")
         print(f"  Final Avg : {avgs[-1]:.1f}")
         print(f"  Best Model: {MODEL_PATH}")
         print(f"{'─'*60}\n")
@@ -263,8 +280,8 @@ class GADinoAI(BaseDinoAI):
 
 def train_from_scratch(args):
     ga_cfg = GAConfig(
-        POPULATION_SIZE   = args.pop,
-        ELITISM_COUNT     = max(1, args.pop // 20),
+        POPULATION_SIZE    = args.pop,
+        ELITISM_COUNT    = max(1, args.pop // 10),
         TOURNAMENT_SIZE   = args.tournament_size,
         CROSSOVER_RATE    = args.crossover_rate,
         MUTATION_RATE     = args.mutation_rate,
@@ -293,22 +310,29 @@ def resume_training(args):
         return
 
     net, meta = GeneticAlgorithm.load_best(args.save)
+    net_cfg = NNConfig()
+    net_cfg.INPUT_SIZE   = net.cfg.INPUT_SIZE
+    net_cfg.HIDDEN_SIZES = net.cfg.HIDDEN_SIZES
+    net_cfg.OUTPUT_SIZE  = net.cfg.OUTPUT_SIZE
 
     ga_cfg = GAConfig(
-        POPULATION_SIZE   = args.pop,
+        POPULATION_SIZE    = args.pop,
+        ELITISM_COUNT    = max(1, args.pop // 10),
         MUTATION_RATE     = args.mutation_rate,
         MUTATION_STRENGTH = args.mutation_strength,
         FITNESS_EVALS     = args.fitness_evals,
         RANDOM_SEED       = args.seed,
     )
 
-    ai = GADinoAI(ga_cfg=ga_cfg)
+    ai = GADinoAI(ga_cfg=ga_cfg, nn_cfg=net_cfg)
     ai.best_network = net
     ai.best_score   = meta["fitness"]
-    ai.generation   = meta["generation"]
+    ai.generation   = meta["best_gen"]
 
-    print(f"\n  Tiếp tục train từ gen={meta['generation']}, "
+    print(f"\n  Tiếp tục train từ gen={meta['best_gen']}, "
           f"fitness={meta['fitness']:.2f}")
+
+    ai.ga.inject_best(net, meta["fitness"], meta["best_gen"])
 
     ai.train(
         n_generations=args.gen,
@@ -341,7 +365,22 @@ def eval_only(args):
     ai = GADinoAI()
     ai.load_model(args.save)
 
-    stats = evaluate(ai, n_runs=args.eval_runs, verbose=True)
+    class _EvalWrapper:
+        __slots__ = ("best_network", "net_input_size", "name")
+
+        def __init__(self, net: DinoNet):
+            self.best_network   = net
+            self.net_input_size = net.cfg.INPUT_SIZE
+            self.name = "GA-Eval"
+
+        def predict(self, state):
+            if state.shape[-1] > self.net_input_size:
+                state = state[..., :self.net_input_size]
+            return self.best_network.predict(state)
+
+    wrapped = _EvalWrapper(ai.best_network)
+
+    stats = evaluate(wrapped, n_runs=args.eval_runs, verbose=True)
     print(f"\n  Tổng kết: mean={stats['mean']:.0f}  "
           f"max={stats['max']}  std={stats['std']:.0f}")
 
@@ -353,12 +392,12 @@ if __name__ == "__main__":
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Ví dụ:
-  python ga/train_ga.py                     # train 300 thế hệ, pop=50
-  python ga/train_ga.py --gen 500 --pop 80  # 500 thế hệ, quần thể 80
+  python ga/train_ga.py                      # train 300 thế hệ, pop=80
+  python ga/train_ga.py --gen 500 --pop 100  # 500 thế hệ, quần thể 100
   python ga/train_ga.py --watch             # xem AI đã train chơi
-  python ga/train_ga.py --resume            # tiếp tục train
-  python ga/train_ga.py --eval              # đánh giá không render
-  python ga/train_ga.py --pop 30 --seed 42
+  python ga/train_ga.py --resume           # tiếp tục train
+  python ga/train_ga.py --eval             # đánh giá không render
+  python ga/train_ga.py --pop 50 --seed 42 # quần thể 50, fix seed
         """,
     )
 
@@ -369,16 +408,16 @@ Ví dụ:
 
     parser.add_argument("--gen",           type=int, default=300,
                         help="Số thế hệ (mặc định: 300)")
-    parser.add_argument("--pop",           type=int, default=50,
-                        help="Kích thước quần thể (mặc định: 50)")
-    parser.add_argument("--fitness-evals", type=int, default=3,
-                        help="Số lần chạy tính fitness/cá thể (mặc định: 3)")
+    parser.add_argument("--pop",           type=int, default=80,
+                        help="Kích thước quần thể (mặc định: 80)")
+    parser.add_argument("--fitness-evals", type=int, default=5,
+                        help="Số lần chạy tính fitness/cá thể (mặc định: 5)")
     parser.add_argument("--crossover-rate",   type=float, default=0.80,
                         help="Xác suất crossover (mặc định: 0.80)")
-    parser.add_argument("--mutation-rate",    type=float, default=0.10,
-                        help="Tỷ lệ đột biến (mặc định: 0.10)")
-    parser.add_argument("--mutation-strength", type=float, default=0.15,
-                        help="Cường độ đột biến sigma (mặc định: 0.15)")
+    parser.add_argument("--mutation-rate",    type=float, default=0.08,
+                        help="Tỷ lệ đột biến (mặc định: 0.08)")
+    parser.add_argument("--mutation-strength", type=float, default=0.10,
+                        help="Cường độ đột biến sigma (mặc định: 0.10)")
     parser.add_argument("--tournament-size",  type=int,   default=5,
                         help="Kích thước tournament (mặc định: 5)")
     parser.add_argument("--seed",      type=int,   default=None,

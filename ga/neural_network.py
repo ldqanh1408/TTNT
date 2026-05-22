@@ -8,7 +8,7 @@ from typing import Optional
 
 
 class NNConfig:
-    INPUT_SIZE   = 13
+    INPUT_SIZE   = 15
     HIDDEN_SIZES = [256, 128]
     OUTPUT_SIZE  = 3
 
@@ -105,6 +105,8 @@ class DinoNet:
             x = state.reshape(1, -1)
         else:
             x = state
+        if x.shape[-1] > self.cfg.INPUT_SIZE:
+            x = x[..., :self.cfg.INPUT_SIZE]
         for layer in self.layers:
             x = layer.forward(x)
         x_shifted = x - np.max(x, axis=-1, keepdims=True)
@@ -146,7 +148,7 @@ class DinoNet:
         with open(path, "wb") as f:
             pickle.dump({
                 "weights": self.get_flat_weights(),
-                "config": {
+                "nn_config": {
                     "input_size":   self.cfg.INPUT_SIZE,
                     "hidden_sizes": self.cfg.HIDDEN_SIZES,
                     "output_size":  self.cfg.OUTPUT_SIZE,
