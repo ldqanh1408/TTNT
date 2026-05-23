@@ -520,8 +520,10 @@ class AdaptiveSpawnPolicy(SpawnPolicy):
         cfg.cactus_size_w_vfast = [max(5, small_w - 10), big_w + 8, double_w + 2]
 
         # Bird height — ép cả nhảy (low) lẫn cúi (high)
-        low_w  = max(15, 30 - int(d * 15))
-        high_w = min(50, 25 + int(d * 25))
+        # Giữ low ≥25 % để mạng có đủ sample học "low bird → JUMP".
+        # Trước: low rớt xuống 15 % ở d=1 → bias "thấy bird là cúi/chạy" do skew.
+        low_w  = max(25, 35 - int(d * 5))
+        high_w = min(45, 25 + int(d * 20))
         mid_w  = max(5, 100 - low_w - high_w)
         cfg.bird_height_w = [low_w, mid_w, high_w]
 
