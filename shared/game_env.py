@@ -1107,35 +1107,47 @@ class DinoEnv:
         self.last_obstacle_type = 'ptera'
 
     def _create_bird_wall(self, center_x: float, spd: float) -> list:
-        """Tạo TƯỜNG CHIM 3 con TÁCH RỜI — tự nhiên nhưng vẫn ép cúi.
+        """TƯỜNG CHIM 2 con (HEAD + MID của cầu thang cũ) — ÉP CÚI.
 
-        Hình học (với sprite 64×56, margin_y=11 → mỗi con collision 34px):
-          Bird H (cao nhất):   sprite_y=179  → rect (190,224)
-          Bird M (giữa):       sprite_y=253  → rect (264,298)
-          Bird L (thấp nhất):  sprite_y=327  → rect (338,372)
+        Chỉ giữ con HEAD (đầu/thấp nhất) + con MID (giữa); bỏ con cao nhất:
+          Bird L (h_off=47, DUCK zone):    HEAD — thấp, đầu chuỗi → ÉP CÚI
+          Bird M (h_off=121, no-jump zone): MID — vừa-cao → CHẶN NHẢY
 
-        Gaps 40px < 61px (dino height) → nhảy luôn bị chặn.
-        Dino CÚI top=378 > 372 → hở 6px, luôn sống được.
+        Bird L gánh toàn bộ ép cúi:
+          rect Bird L = (338, 372) ; max_jump ≈ 89, apex bot ≈ 341
+          - ĐỨNG (top=369, bot=430) vs (338,372): 369 < 372 → COLLISION
+          - Apex JUMP (bot≈341) vs (338,372): 341 > 338 → 3px COLLISION
+          - CÚI (top=378) > 372 → hở 6px → AN TOÀN
 
-        Mỗi con lệch x ±10px, lệch pha cánh ngẫu nhiên → đàn tự nhiên.
-        Bird L (thấp nhất) đặt GẦN dino nhất → obs1 trong state → DUCK hint.
+        Bird M củng cố no-jump zone (không gây ép cúi nhưng cấm nhảy lần 2):
+          rect Bird M = (264, 298)
+          - ĐỨNG (369-430): no overlap → SAFE (chạy đứng qua được)
+          - Apex JUMP (top=280, bot=341): 280<298 AND 341>264 → COLLISION
+          - CÚI (top=378) > 298 → SAFE
+
+        → Dino BẮT BUỘC CÚI ở Bird L. Sau khi cúi, qua Bird M an toàn.
+          Nhảy chết tại Bird L (và Bird M nếu vẫn nhảy lúc đó).
+
+        Layout ascending từ trái sang phải:
+          Bird L (thấp) tại x = -gap   ←—— gap ——→   Bird M (giữa) tại x = +gap
+        Bird L gần dino nhất → obs1 trong state → DUCK hint sớm.
+
+        Gap giãn từ spd*6 lên spd*8 (min 28 → 36), +33%:
+          spd=6  → gap=48,  span ≈ 160px
+          spd=14 → gap=112, span ≈ 288px
+          spd=20 → gap=160, span ≈ 384px
         """
         ground_top = SCREEN_H - GROUND_Y_OFFSET  # 430
         bird_h = self.sprites.ptera_h()           # 56
 
-        # 3 vị trí y: thấp nhất (gần mid height) → obs1, 2 con cao hơn phía sau
+        # Giữ con HEAD (thấp, ép cúi) + con MID (giữa, chặn nhảy)
         y_positions = [
-            ground_top - bird_h - 47,   # Bird L: offset ~47 → mid range → DUCK hint
-            ground_top - bird_h - 121,  # Bird M: offset ~121 → high
-            ground_top - bird_h - 195,  # Bird H: offset ~195 → high
+            ground_top - bird_h - 47,   # Bird L: HEAD — DUCK zone (ép cúi)
+            ground_top - bird_h - 121,  # Bird M: MID  — no-jump zone
         ]
 
-        # Dynamic spacing: flock stretches horizontally with speed for natural look.
-        # At spd=6:  spacing=18 → total span ~116px (tight, early game)
-        # At spd=14: spacing=42 → total span ~164px (flowing)
-        # At spd=20: spacing=60 → total span ~200px (stretched, fast-paced)
-        gap = max(14, int(spd * 3.0))
-        x_offsets = [-gap, 0, gap]  # lowest bird closest to dino
+        gap = max(36, int(spd * 8.0))
+        x_offsets = [-gap, gap]  # ascending: low-left → mid-right
 
         birds = []
         for i, y in enumerate(y_positions):
