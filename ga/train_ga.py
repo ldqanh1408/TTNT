@@ -36,8 +36,8 @@ from shared.evaluator  import run_episode, evaluate, watch_ai
 from shared.config     import STATE_SIZE, ACTION_SIZE, MAX_STEPS_PER_EPISODE
 
 
-MODEL_PATH = "model/best_dino_ga.pkl"
-CHART_PATH = "model/ga_training_curve.png"
+MODEL_PATH = "model/ga_best.pkl"
+CHART_PATH = "model/training_ga_curve.png"
 
 
 class GADinoAI(BaseDinoAI):
