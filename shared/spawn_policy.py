@@ -396,6 +396,7 @@ class AdaptiveSpawnPolicy(SpawnPolicy):
         self.episode            = 0
         self._difficulty        = 0.10
         self._target_difficulty = 0.18
+        self._monotonic_floor   = 0.05   # set lại trong set_episode mỗi ep
 
         self.score_window = deque(maxlen=20)
         self._difficulty_history = []
@@ -409,18 +410,30 @@ class AdaptiveSpawnPolicy(SpawnPolicy):
         # Base curriculum: power curve 1.3 → dễ ở đầu, tăng tốc ở cuối
         base_difficulty = progress ** 1.3
 
-        # Soft floor = 40% của base (cho phép difficulty thực sự giảm khi agent struggling)
-        # BUG FIX: sàn cứng = full base_difficulty lock difficulty tăng dù score avg chỉ 25-30
-        # Ví dụ ep 950: avg=62, target muốn giảm xuống 0.33, nhưng base=0.41 → max(0.41,0.33)=0.41
-        # → difficulty tiếp tục tăng → catastrophic forgetting từ ep 850 trở đi
-        curriculum_floor = base_difficulty * 0.4
+        # Monotonic curriculum floor — TĂNG dần theo progress, ngăn curriculum
+        # collapse về 0.05 ở cuối training. Trước đây diff có thể nhảy
+        # 0.22 → 0.05 trong 1 lần update_performance → agent train trên easy
+        # patterns 100 ep cuối → catastrophic forgetting → eval mean=58.
+        #   progress < 0.6 (ep < 1500/2500)    → floor = 0.05
+        #   progress 0.6-0.8 (ep 1500-2000)    → 0.05 → 0.13
+        #   progress > 0.8 (ep > 2000)         → 0.13 → 0.20
+        if progress < 0.6:
+            curriculum_floor = 0.05
+        elif progress < 0.8:
+            curriculum_floor = 0.05 + (progress - 0.6) * 0.40
+        else:
+            curriculum_floor = 0.13 + (progress - 0.8) * 0.35
+        self._monotonic_floor = curriculum_floor
+
         self._target_difficulty = max(curriculum_floor, self._target_difficulty)
 
-        # Asymmetric P-controller: giảm nhanh (0.35) khi agent struggling, tăng chậm (0.15)
+        # Symmetric P-controller — bỏ asymmetric 0.35/0.15 vì gây oscillation:
+        # avg drop nhẹ → target_diff bị trừ 0.06 → gain 0.35 đập diff từ 0.22 → 0.05
+        # trong 1-2 ep → agent quên hết skill khó → vòng lặp tự huỷ.
         error = self._target_difficulty - self._difficulty
-        gain  = 0.35 if error < 0 else 0.15
+        gain  = 0.15
         self._difficulty += gain * error
-        self._difficulty = max(0.0, min(1.0, self._difficulty))
+        self._difficulty = max(curriculum_floor, min(1.0, self._difficulty))
 
         self._apply_curriculum()
         self._difficulty_history.append(self._difficulty)
@@ -442,25 +455,27 @@ class AdaptiveSpawnPolicy(SpawnPolicy):
 
         avg = np.mean(self.score_window)
 
-        # Ngưỡng score đã nhân ~2x so với bản cũ (30/50/100/200/400/700).
-        # Lý do: điểm giờ tính theo quãng đường (game_speed/SCORE_DISTANCE mỗi
-        # frame) nên cùng một độ-sống-sót sẽ cho điểm cao hơn ~1.6-2.4x so với
-        # cách cũ (+1/7 frame). Không scale ngưỡng → curriculum tưởng agent giỏi
-        # hơn thực tế → đẩy difficulty quá nhanh, mất ổn định.
+        # Floor động — tôn trọng monotonic floor đã set ở set_episode().
+        # Không cho target_difficulty rớt dưới floor cuối training.
+        floor = getattr(self, '_monotonic_floor', 0.03)
+
+        # Ngưỡng score giữ nguyên. SOFT drop magnitudes (cũ: -0.06 / -0.02 →
+        # nay: -0.02 / -0.01) để diff không sụp đột ngột khi avg dao động.
+        # Kết hợp với gain=0.15 đối xứng trong set_episode, oscillation
+        # 0.22 → 0.05 → 0.15 → 0.05 sẽ không còn xảy ra.
         if avg < 60:
-            self._target_difficulty = max(0.03, self._difficulty - 0.18)   # agent thực sự gặp khó → giảm mạnh
-        elif avg < 100:
-            self._target_difficulty = max(0.05, self._difficulty - 0.12)   # struggling
+            self._target_difficulty = max(floor, self._difficulty - 0.02)   # agent gặp khó → giảm nhẹ
+        elif avg < 120:
+            self._target_difficulty = max(floor, self._difficulty - 0.01)   # struggling → giảm rất nhẹ
         elif avg < 200:
-            self._target_difficulty = max(0.08, self._difficulty - 0.06)   # dưới kỳ vọng
+            self._target_difficulty = min(0.45, self._difficulty + 0.005)   # vùng tích lũy → tăng nhẹ
         elif avg < 400:
-            self._target_difficulty = min(0.45, self._difficulty + 0.010)  # tiến bộ chậm → tăng nhẹ
+            self._target_difficulty = min(0.65, self._difficulty + 0.015)   # tiến bộ tốt → tăng
         elif avg < 800:
-            self._target_difficulty = min(0.65, self._difficulty + 0.020)
-        elif avg < 1400:
-            self._target_difficulty = min(0.85, self._difficulty + 0.035)
+            self._target_difficulty = min(0.85, self._difficulty + 0.030)   # giỏi → tăng nhanh
         else:
-            self._target_difficulty = min(1.0, self._difficulty + 0.05)
+            self._target_difficulty = min(1.0, self._difficulty + 0.050)    # xuất sắc → tăng mạnh
+
 
     @property
     def difficulty(self) -> float:

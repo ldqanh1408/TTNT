@@ -35,8 +35,9 @@ from dqn.dqn_ai import DQNDinoAI, DQN_CONFIG
 from shared.evaluator import watch_ai, evaluate
 
 
-MODEL_PATH = "model/dqn_best.pkl"
-CHART_PATH = "model/training_curve.png"
+MODEL_PATH     = "model/dqn_best.pkl"          # best rolling-avg (stable)
+MODEL_RAW_PATH = "model/dqn_best_raw.pkl"      # best raw ep_score (PPO-style)
+CHART_PATH     = "model/training_curve.png"
 
 
 # ──────────────────────────────────────────────────────────
@@ -198,7 +199,7 @@ def train_from_scratch():
     ai = DQNDinoAI()
 
     scores = ai.train(
-        n_episodes       = 2000,
+        n_episodes       = 2500,
         max_steps_per_ep = 10_000,
         verbose_every    = 50,
         save_path        = MODEL_PATH,
@@ -206,9 +207,34 @@ def train_from_scratch():
 
     plot_scores(scores, losses=ai.losses)
 
+    # ── Đánh giá CẢ 2 model rồi chọn cái tốt hơn ───────────
+    # Rolling-avg model = consistent performer (ổn định nhưng có thể bị
+    # "lock-in" giai đoạn easy curriculum).
+    # Best-raw model = peak performer (catch những đỉnh cao trong training).
+    # Final = max(eval_runs(rolling), eval_runs(raw)) — đảm bảo lấy được model
+    # mạnh nhất, không phụ thuộc 1 metric duy nhất.
     print("\n─── Đánh giá sau khi train ───")
-    ai.epsilon = 0.0
-    evaluate(ai, n_runs=10, verbose=True)
+    candidates = []
+    for label, path in [("rolling-avg", MODEL_PATH), ("best-raw", MODEL_RAW_PATH)]:
+        if not os.path.exists(path):
+            print(f"  [{label}] missing: {path}")
+            continue
+        print(f"\n  [{label}] Loading {path}")
+        ai.load_model(path)
+        ai.epsilon = 0.005
+        stats = evaluate(ai, n_runs=20, verbose=True)
+        candidates.append((label, path, stats))
+
+    if len(candidates) >= 2:
+        # Pick winner by mean score (most robust signal)
+        winner = max(candidates, key=lambda c: c[2]["mean"])
+        print(f"\n  >>> Winner: [{winner[0]}] mean={winner[2]['mean']:.1f} "
+              f"max={winner[2]['max']} (path: {winner[1]})")
+        # Re-load winner as final model
+        ai.load_model(winner[1])
+    elif candidates:
+        print(f"\n  Only 1 model evaluated: {candidates[0][0]}")
+
 
 
 # ──────────────────────────────────────────────────────────
@@ -244,7 +270,7 @@ def watch():
 
     ai = DQNDinoAI()
     ai.load_model(MODEL_PATH)
-    ai.epsilon = 0.0
+    ai.epsilon = 0.005
     watch_ai(ai, n_games=5)
 
 
@@ -258,7 +284,7 @@ def eval_only():
 
     ai = DQNDinoAI()
     ai.load_model(MODEL_PATH)
-    ai.epsilon = 0.0
+    ai.epsilon = 0.005
 
     stats = evaluate(ai, n_runs=20, verbose=True)
     print(f"\n  Tổng kết: mean={stats['mean']:.0f}  "
