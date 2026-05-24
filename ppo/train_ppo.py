@@ -94,7 +94,7 @@ def train_from_scratch():
 def train_resume():
     ai = PPODinoAI()
     ai.load_model(MODEL_PATH)
-    scores = ai.train(n_episodes=1000, save_path=MODEL_PATH)
+    scores = ai.train(n_episodes=2000, save_path=MODEL_PATH)
     plot_scores(scores)
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "lastScanned": 1778775891203,
+  "lastScanned": 1779582068450,
   "projectRoot": "C:\\Users\\CYBORG\\PycharmProjects\\PythonProject",
   "techStack": {
     "languages": [
@@ -41,9 +41,10 @@
     "dqn": {
       "path": "dqn",
       "purpose": null,
-      "fileCount": 3,
-      "lastAccessed": 1778775891162,
+      "fileCount": 4,
+      "lastAccessed": 1779582068434,
       "keyFiles": [
+        "dqn_academic_report.md",
         "dqn_ai.py",
         "README.md",
         "train_dqn.py"
@@ -52,17 +53,33 @@
     "model": {
       "path": "model",
       "purpose": null,
-      "fileCount": 1,
-      "lastAccessed": 1778775891163,
+      "fileCount": 5,
+      "lastAccessed": 1779582068434,
       "keyFiles": [
-        "dqn_best.pkl"
+        "dqn_best.pkl",
+        "ppo_best.pkl",
+        "ppo_best_best.pkl",
+        "training_curve.png",
+        "training_curve_ppo.png"
+      ]
+    },
+    "ppo": {
+      "path": "ppo",
+      "purpose": null,
+      "fileCount": 4,
+      "lastAccessed": 1779582068434,
+      "keyFiles": [
+        "ppo_academic_report.md",
+        "ppo_ai.py",
+        "README.md",
+        "train_ppo.py"
       ]
     },
     "shared": {
       "path": "shared",
       "purpose": null,
       "fileCount": 8,
-      "lastAccessed": 1778775891163,
+      "lastAccessed": 1779582068435,
       "keyFiles": [
         "base_ai.py",
         "config.py",
@@ -75,7 +92,7 @@
       "path": "templates",
       "purpose": null,
       "fileCount": 18,
-      "lastAccessed": 1778775891164,
+      "lastAccessed": 1779582068435,
       "keyFiles": [
         "cacti-big.png",
         "cacti-small.png",
@@ -88,7 +105,7 @@
       "path": "__pycache__",
       "purpose": null,
       "fileCount": 1,
-      "lastAccessed": 1778775891165,
+      "lastAccessed": 1779582068435,
       "keyFiles": [
         "template_ai.cpython-314.pyc"
       ]
@@ -96,75 +113,75 @@
   },
   "hotPaths": [
     {
-      "path": "shared\\spawn_policy.py",
-      "accessCount": 21,
-      "lastAccessed": 1778781179097,
-      "type": "file"
-    },
-    {
-      "path": "shared\\game_env.py",
-      "accessCount": 14,
-      "lastAccessed": 1778781179166,
-      "type": "file"
-    },
-    {
       "path": "dqn\\dqn_ai.py",
-      "accessCount": 9,
-      "lastAccessed": 1778777359362,
-      "type": "file"
-    },
-    {
-      "path": "dqn\\README.md",
-      "accessCount": 7,
-      "lastAccessed": 1778778841973,
-      "type": "file"
-    },
-    {
-      "path": "",
-      "accessCount": 5,
-      "lastAccessed": 1778777130263,
-      "type": "directory"
-    },
-    {
-      "path": "shared\\config.py",
-      "accessCount": 3,
-      "lastAccessed": 1778777015385,
+      "accessCount": 10,
+      "lastAccessed": 1779583145221,
       "type": "file"
     },
     {
       "path": "dqn\\train_dqn.py",
+      "accessCount": 3,
+      "lastAccessed": 1779582662867,
+      "type": "file"
+    },
+    {
+      "path": "shared\\game_env.py",
       "accessCount": 2,
-      "lastAccessed": 1778777121803,
+      "lastAccessed": 1779582271328,
       "type": "file"
     },
     {
       "path": "shared\\base_ai.py",
       "accessCount": 1,
-      "lastAccessed": 1778776253595,
+      "lastAccessed": 1779582253696,
+      "type": "file"
+    },
+    {
+      "path": "ppo\\ppo_ai.py",
+      "accessCount": 1,
+      "lastAccessed": 1779582253758,
+      "type": "file"
+    },
+    {
+      "path": "shared\\config.py",
+      "accessCount": 1,
+      "lastAccessed": 1779582253776,
+      "type": "file"
+    },
+    {
+      "path": "ppo\\train_ppo.py",
+      "accessCount": 1,
+      "lastAccessed": 1779582253822,
       "type": "file"
     },
     {
       "path": "shared\\evaluator.py",
       "accessCount": 1,
-      "lastAccessed": 1778776253834,
+      "lastAccessed": 1779582253868,
       "type": "file"
     },
     {
-      "path": "shared\\renderer.py",
+      "path": "shared\\spawn_policy.py",
       "accessCount": 1,
-      "lastAccessed": 1778776261193,
+      "lastAccessed": 1779582253930,
       "type": "file"
     },
     {
-      "path": "dqn\\model\\training_curve.png",
+      "path": "dqn\\dqn_academic_report.md",
       "accessCount": 1,
-      "lastAccessed": 1778776295645,
+      "lastAccessed": 1779582271289,
       "type": "file"
     },
     {
-      "path": "template_ai.py",
+      "path": "ppo\\ppo_academic_report.md",
       "accessCount": 1,
-      "lastAccessed": 1778777121789,
+      "lastAccessed": 1779582271360,
+      "type": "file"
+    },
+    {
+      "path": "model\\training_curve.png",
+      "accessCount": 1,
+      "lastAccessed": 1779582987742,
       "type": "file"
     }
   ],

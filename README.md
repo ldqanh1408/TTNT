@@ -1,31 +1,61 @@
-# Chrome Dino AI — Đồ án AI
+# Nghiên cứu so sánh Học tăng cường sâu và Thuật toán Tiến hoá cho bài toán điều khiển Agent tự động trong môi trường Chrome Dinosaur: Dueling Double DQN, Proximal Policy Optimization, và Genetic Algorithm Neural Network
 
-Dự án game Chrome Dino kết hợp AI điều khiển khủng long tự động vượt chướng ngại vật.
+> **Đồ án nghiên cứu so sánh ba mô hình AI** trên cùng một môi trường benchmark (Chrome Dinosaur game), đối chiếu ba trường phái Trí tuệ nhân tạo chính trong giải quyết bài toán điều khiển Agent tự động.
+
+## Tóm tắt (Abstract)
+
+Đồ án xây dựng và đánh giá định lượng ba paradigm AI khác nhau cho cùng bài toán điều khiển khủng long tự động vượt chướng ngại vật trong môi trường Chrome Dinosaur:
+
+| # | Mô hình | Họ thuật toán | Đặc trưng cốt lõi |
+|---|---|---|---|
+| 1 | **Dueling Double DQN + PER** | Học tăng cường — Value-based, Off-policy | Phương trình Bellman, Replay Buffer ưu tiên TD-error, Dueling Heads |
+| 2 | **PPO (Actor-Critic Clipped)** | Học tăng cường — Policy-based, On-policy | Clipped Surrogate Objective, GAE, Entropy Regularization |
+| 3 | **GA-NN (Genetic Algorithm + Neural Network)** | Tiến hoá quần thể — Gradient-free | Tournament Selection, Uniform Crossover, Gaussian Mutation, Elitism |
+
+Cả ba mô hình chia sẻ cùng một thiết lập MDP đặc trưng 15-chiều, cùng không gian hành động 3-chiều (DUCK/JUMP/RUN), cùng hàm phần thưởng và cùng chính sách sinh môi trường (`AdaptiveSpawnPolicy`). Điều này cho phép so sánh trực tiếp ba thuật toán trên các tiêu chí: *sample efficiency*, *policy stability*, *wall-clock convergence time*, và *generalization* qua các cấu hình spawn chưa thấy trong huấn luyện.
 
 ## Cấu trúc thư mục
 
 ```
 PythonProject/
-├── main.py                  # Điểm vào chính
-├── template_ai.py           # Template cho AI mới
-├── README.md
+├── main.py                          # Điểm vào chính (chọn AI để demo)
+├── template_ai.py                   # Template tạo AI mới
+├── README.md                        # Tài liệu tổng thể (file này)
 ├── requirements.txt
 │
-├── shared/                  # PHẦN CHUNG
-│   ├── config.py            # Hằng số game, state size, action size
-│   ├── base_ai.py           # Lớp abstract BaseDinoAI
-│   ├── game_env.py          # Game environment + spawn logic + reward
-│   ├── renderer.py          # Load & scale sprite
-│   ├── evaluator.py         # Đánh giá & so sánh AI
-│   └── manual_play.py       # Chơi tay
+├── shared/                          # PHẦN CHUNG GIỮA CẢ 3 MÔ HÌNH
+│   ├── config.py                    # Hằng số game, state size, action size
+│   ├── base_ai.py                   # Lớp abstract BaseDinoAI
+│   ├── game_env.py                  # DinoEnv: physics + spawn + reward
+│   ├── spawn_policy.py              # SpawnPolicy / AdaptiveSpawnPolicy
+│   ├── renderer.py                  # Load & scale sprite
+│   ├── evaluator.py                 # Đánh giá & so sánh AI
+│   └── manual_play.py               # Chơi tay (baseline)
 │
-├── dqn/                     # Deep Q-Network
-│   ├── dqn_ai.py            # QNetwork, ReplayBuffer, DQNDinoAI
-│   ├── train_dqn.py         # Script train + dashboard
-│   └── README.md            # Chi tiết DQN
+├── dqn/                             # MÔ HÌNH 1 — Dueling DDQN + PER
+│   ├── dqn_ai.py                    # DuelingQNetwork + PER Buffer + DQNDinoAI
+│   ├── train_dqn.py                 # Script train + dashboard
+│   ├── dqn_academic_report.md       # Báo cáo học thuật DQN
+│   └── README.md                    # Chi tiết DQN
 │
-└── model/                   # Model đã train
-    └── dqn_best.pkl
+├── ppo/                             # MÔ HÌNH 2 — PPO (Actor-Critic)
+│   ├── ppo_ai.py                    # ActorCritic + Rollout Buffer + PPODinoAI
+│   ├── train_ppo.py                 # Script train + dashboard
+│   ├── ppo_academic_report.md       # Báo cáo học thuật PPO
+│   └── README.md                    # Chi tiết PPO
+│
+├── ga/                              # MÔ HÌNH 3 — Genetic Algorithm + NN
+│   │                                # (nằm trên nhánh `training/ga`)
+│   ├── ga_ai.py                     # GAConfig + GenomeIndividual + GADinoAI
+│   ├── neural_network.py            # DinoNet (NumPy MLP, không dùng autograd)
+│   ├── train_ga.py                  # Script train + dashboard
+│   ├── REPORT_GA_NN.md              # Báo cáo học thuật GA-NN
+│   └── README_GA.md                 # Chi tiết GA
+│
+└── model/                           # Model đã train
+    ├── dqn_best.pkl
+    ├── ppo_best.pkl
+    └── ga_best.pkl
 ```
 
 ## Cài đặt
@@ -37,12 +67,35 @@ pip install pygame numpy matplotlib pillow torch
 
 ## Cách chạy
 
+### Mô hình 1 — DQN (Dueling Double DQN + PER)
 ```bash
-python dqn/train_dqn.py              # Train DQN từ đầu (2000 episodes)
-python dqn/train_dqn.py --resume     # Tiếp tục train từ checkpoint
-python dqn/train_dqn.py --eval       # Đánh giá (10 runs, không render)
-python dqn/train_dqn.py --watch      # Xem AI chơi (5 ván)
+python -m dqn.train_dqn              # Train từ đầu
+python -m dqn.train_dqn --resume     # Tiếp tục từ checkpoint
+python -m dqn.train_dqn --eval       # Đánh giá (không render)
+python -m dqn.train_dqn --watch      # Xem AI chơi
 ```
+
+### Mô hình 2 — PPO (Proximal Policy Optimization)
+```bash
+python -m ppo.train_ppo              # Train từ đầu (2000 episodes)
+python -m ppo.train_ppo --resume     # Tiếp tục từ model đã lưu
+python -m ppo.train_ppo --eval       # Đánh giá 10 runs
+python -m ppo.train_ppo --watch      # Xem AI chơi 5 ván
+```
+
+### Mô hình 3 — GA-NN (Genetic Algorithm + Neural Network)
+```bash
+# Lưu ý: code GA hiện đang ở nhánh `training/ga`
+git checkout training/ga
+python -m ga.train_ga                # Train tiến hoá quần thể
+python -m ga.train_ga --eval         # Đánh giá best individual
+python -m ga.train_ga --watch        # Xem best individual chơi
+```
+
+### Tài liệu học thuật chi tiết theo mô hình
+*   [`dqn/dqn_academic_report.md`](dqn/dqn_academic_report.md) — Báo cáo Dueling DDQN + PER
+*   [`ppo/ppo_academic_report.md`](ppo/ppo_academic_report.md) — Báo cáo PPO + GAE
+*   `ga/REPORT_GA_NN.md` — Báo cáo GA-NN *(trên nhánh `training/ga`)*
 
 ---
 
@@ -184,56 +237,78 @@ Không spawn chim 2 lần liên tiếp. 3 độ cao: sát đất (phải nhảy)
 
 ---
 
-## Kiến trúc DQN
+## Kiến trúc các mô hình (Tổng quan)
 
+Cả ba mô hình đều nhận đầu vào State Vector 15-D và xuất 1 trong 3 action (DUCK/JUMP/RUN), nhưng có cấu trúc và cơ chế học khác nhau.
+
+### Mô hình 1 — Dueling DDQN + PER
 ```
-Input(13) → Linear(128) → ReLU → Linear(64) → ReLU → Linear(3)
+Input(15) → Linear(256)+LayerNorm+ReLU → Linear(128)+LayerNorm+ReLU
+                                                         ↓
+                          ┌──────────────────────────────┴──────────────────────────────┐
+              Value Head: Linear(128→64)+LN+ReLU+Linear(64→1) → V(s)
+              Advantage:  Linear(128→64)+LN+ReLU+Linear(64→3) → A(s, a)
+                                                         ↓
+              Q(s, a) = V(s) + (A(s, a) - mean_a' A(s, a'))
 ```
+- **Cập nhật**: Phương trình Bellman với Double Q-Learning (target = $r + \gamma Q(s', \arg\max_a Q(s', a; \theta); \theta^-)$)
+- **Replay**: Prioritized Experience Replay (200K, $\alpha=0.6$, $\beta: 0.4→1.0$)
+- **Loss**: Huber + IS weights; **Optimizer**: Adam + Polyak soft target ($\tau=0.003$)
+- Chi tiết: [`dqn/dqn_academic_report.md`](dqn/dqn_academic_report.md)
 
-~10,000 tham số. Double DQN + soft target update + Huber loss.
-
-### Hyperparameters
-
-| Param | Value | Giải thích |
-|---|---|---|
-| `lr` | `5e-5` | Learning rate thấp → ổn định |
-| `gamma` | `0.995` | Discount cao → ưu tiên sống lâu |
-| `tau` | `0.02` | Soft target update chậm → ổn định |
-| `batch_size` | `256` | Batch lớn → gradient ổn định |
-| `buffer_capacity` | `200_000` | ~600 episodes gần nhất |
-| `learn_start` | `5_000` | Đợi đủ experience mới học |
-| `learn_every` | `2` | Học mỗi 2 steps |
-| `grad_clip` | `1.0` | Gradient clipping |
-| `loss` | SmoothL1Loss | Huber loss |
-| `eps_start` | `1.0` | Epsilon ban đầu |
-| `eps_decay` | `0.997` | Decay mỗi episode |
-| `eps_end` | `0.02` | Epsilon tối thiểu |
-
-### Sơ đồ
-
+### Mô hình 2 — PPO (Actor-Critic Clipped)
 ```
-┌──────────┐    state(13)     ┌───────────────┐    action(3)
-│   GAME   │ ───────────────► │   Q-NETWORK   │ ──────────────► DINO
-│   ENV    │                  │  13→128→64→3  │
-│          │ ◄────────────────│               │
-└──────────┘   (s,a,r,s',done)└───────────────┘
-      │                               ▲
-      │         ┌───────────┐         │
-      └────────►│  REPLAY   │─────────┘
-                │  BUFFER   │  batch 256
-                │  200K     │
-                └───────────┘
+Actor:   Input(15) → Linear(256)+LN+Tanh → Linear(128)+LN+Tanh → Linear(3) → Categorical π(a|s)
+Critic:  Input(15) → Linear(256)+LN+Tanh → Linear(128)+LN+Tanh → Linear(1) → V(s)
 ```
+- **Cập nhật**: Clipped Surrogate Objective $L^{\text{CLIP}} = E[\min(r_t \hat{A}_t, \text{clip}(r_t, 1-\epsilon, 1+\epsilon)\hat{A}_t)]$, $\epsilon=0.2$
+- **Advantage**: Generalized Advantage Estimation (GAE), $\lambda=0.95$
+- **Rollout**: 4096 steps → 10 epochs × 16 mini-batch (256) → clear buffer
+- **Loss tổng**: $-L^{\text{CLIP}} + 0.5 L^{\text{VF}} - 0.01 H(\pi)$
+- Chi tiết: [`ppo/ppo_academic_report.md`](ppo/ppo_academic_report.md)
+
+### Mô hình 3 — GA-NN (Tiến hoá Quần thể)
+```
+Quần thể 80 cá thể × DinoNet(15→256→128→3 với ReLU+Softmax)
+   ↓ Đánh giá fitness (chạy 5 ván, lấy điểm trung bình)
+   ↓ Tournament Selection (k=5) → chọn bố mẹ
+   ↓ Uniform Crossover (rate=0.80) → con
+   ↓ Gaussian Mutation (rate=0.08, σ=0.10) → đột biến
+   ↓ Elitism (giữ 8 cá thể tốt nhất, age-penalized) → quần thể mới
+```
+- **Không dùng gradient**: trọng số được tối ưu bằng thao tác sinh học trên gen
+- **Hàm fitness**: trung bình điểm số 5 episode (tránh nhiễu single-run)
+- **Backbone NN**: NumPy thuần (không PyTorch), forward duy nhất, không backward
+- Chi tiết: `ga/REPORT_GA_NN.md` *(trên nhánh `training/ga`)*
 
 ---
 
-## Kết quả tốt nhất (DQN)
+## Bảng so sánh ba mô hình
 
-| Metric | Value |
-|---|---|
-| Train best | **1372** |
-| Eval mean | 182 |
-| Eval max | 326 |
+| Tiêu chí | DQN | PPO | GA-NN |
+|---|---|---|---|
+| Trường phái | Value-based RL | Policy-based RL | Evolutionary Computation |
+| On/Off-policy | Off-policy | On-policy | Không áp dụng (gradient-free) |
+| Cơ chế học | Bellman + TD-error | Policy Gradient + Clip | Sinh học (selection/crossover/mutation) |
+| Bộ nhớ | PER Buffer (200K) | Rollout Buffer (4096) | Quần thể (80 cá thể) |
+| Exploration | $\epsilon$-greedy decay | Stochastic policy + entropy | Mutation $\sigma=0.10$ |
+| Activation | ReLU | Tanh | ReLU + Softmax |
+| Khởi tạo | Kaiming Normal | Orthogonal (std tuỳ lớp) | Xavier |
+| Framework | PyTorch (autograd) | PyTorch (autograd) | NumPy (no autograd) |
+| Sample efficiency | Cao (tái sử dụng) | Trung bình | Thấp (nhiều fitness eval) |
+| Ổn định | Phụ thuộc PER/τ | Cao (clip + KL implicit) | Cao (elitism đảm bảo monotonic) |
+| Song song hoá | Khó | Khó | Dễ (đánh giá quần thể đồng thời) |
+
+---
+
+## Tiêu chí đánh giá đồ án
+
+Cả ba mô hình được benchmark trên các tiêu chí định lượng sau:
+1. **Best Score**: điểm cao nhất đạt được trong huấn luyện
+2. **Avg Eval Score**: điểm trung bình trên 10 episode đánh giá (không exploration)
+3. **Wall-clock Convergence**: thời gian thực để đạt ngưỡng điểm mục tiêu
+4. **Variance giữa seed**: độ ổn định giữa các lần chạy
+5. **Generalization**: hiệu năng trên cấu hình spawn ngoài dải huấn luyện
 
 ---
 

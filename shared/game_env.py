@@ -589,7 +589,10 @@ class DinoEnv:
                 if ob.type_ == "bird":
                     bird_ground_dist = self.ground_y - ob.y - ob.h
                     if bird_ground_dist < 40:        # sát đất → phải nhảy
-                        bonus += 12.0
+                        if dino.is_jumping:
+                            bonus += 12.0            # đúng: NHẢY
+                        else:
+                            bonus += -8.0            # SAI: cúi/đứng → đối xứng với high-bird
                     elif bird_ground_dist < 80:      # giữa → đứng/cúi an toàn, nhảy nguy hiểm
                         if dino.is_jumping:
                             bonus += 2.0             # sống sót dù sai hành động
@@ -637,9 +640,10 @@ class DinoEnv:
 
             # Phạt duy trì cúi khi không còn mid bird / tường chim nào gần
             # Trước đây chỉ phạt lúc bắt đầu cúi → dino có thể cúi mãi không unduck
+            # Tăng 0.06 → 0.15 để bias "duck-by-default" không có lời ròng so với +12 bonus
             if dino.is_ducking:
                 if not self._duck_needed_ahead(dino):
-                    action_penalty -= 0.06
+                    action_penalty -= 0.15
 
             reward = 0.002 + bonus + action_penalty
         if done:
@@ -1373,7 +1377,16 @@ class DinoEnv:
                 state[base + 0] = min(1.0, t_frames / 60.0)
 
                 # [base+1] chiều cao obstacle
-                state[base + 1] = min(1.0, ob.h / 160.0)
+                # Với CACTUS: sprite-height (~56-100), phân biệt small/big.
+                # Với BIRD: bird_ground_dist (khoảng cách bụng chim → mặt đất).
+                #   Sprite-h của chim gần như const → vô dụng. Đổi sang ground-dist
+                #   cho mạng tín hiệu LIÊN TỤC phân biệt low/mid/high
+                #   (0.06=low, 0.31=mid, 0.75=high) thay vì chỉ dựa action_hint rời rạc.
+                if ob.type_ == "bird":
+                    bgd = self.ground_y - ob.y - ob.h
+                    state[base + 1] = min(1.0, max(0.0, bgd) / 160.0)
+                else:
+                    state[base + 1] = min(1.0, ob.h / 160.0)
 
                 # [base+2] chiều RỘNG obstacle — feature MỚI.
                 # cactus_small w=26, cactus_double w=54, cactus_big w=36-81, chim w=80.

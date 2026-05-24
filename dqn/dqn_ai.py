@@ -50,34 +50,54 @@ DQN_CONFIG = {
     "action_size"       : 3,
 
     # Prioritized Experience Replay
-    "buffer_capacity"   : 200_000,
+    "buffer_capacity"   : 500_000,    # 200k → 500k: giảm catastrophic forgetting
     "per_alpha"         : 0.6,
     "per_beta_start"    : 0.4,
     "per_beta_end"      : 1.0,
-    "per_beta_frames"   : 500_000,
+    "per_beta_frames"   : 1_000_000, # 500k → 1M: beta annealing chậm hơn cho buffer lớn
     "per_epsilon"       : 1e-6,
 
+    # ── N-step returns (Rainbow-style multi-step bootstrap) ──
+    # PPO dùng GAE λ=0.95 ≈ propagate reward ~20 steps trong 1 update.
+    # DQN 1-step → +12 reward chỉ được lan ngược 1 step/learn → credit
+    # assignment cực chậm với Chrome Dino (sparse +12 mỗi ~50 frames).
+    # n=3 cân bằng bias/variance & cải thiện đáng kể tốc độ hội tụ.
+    "n_step"            : 3,
+
     # Training
-    "batch_size"        : 512,       # 256 → 512: batch lớn hơn = gradient ổn hơn
+    "batch_size"        : 256,       # 512 → 256: lower replay ratio to prevent catastrophic forgetting
     "learn_start"       : 10_000,
     "lr"                : 3e-4,      # 1e-4 → 3e-4: LR cao hơn vì decay đã sửa
-    "lr_decay"          : 0.9999990, # BUG FIX: 0.9999 → 0.9999990 (sau 200k steps: 0.82x, không về 0)
+    "cosine_T_max"      : 4_000_000, # learn_every=2 → ~3.7M learn steps cho 2500 ep
     "min_lr"            : 5e-5,      # sàn LR để không bao giờ về 0
     "gamma"             : 0.99,
-    "tau"               : 0.003,     # 0.005 → 0.003: target update chậm hơn = ổn định hơn
+    "tau"               : 0.0015,    # 0.003 → 0.0015: slower target update for better Q-learning stability
+
     "grad_clip"         : 5.0,       # 10.0 → 5.0: kiểm soát gradient tốt hơn
     "dropout"           : 0.0,
 
     # Exploration
     "eps_start"         : 1.0,
-    "eps_decay"         : 0.9960,    # 0.995 → 0.9960: chậm hơn, đạt eps_end ~ep 1150
-    "eps_end"           : 0.01,      # 0.02 → 0.01: khám phá ít hơn ở giai đoạn cuối
-    "eps_end_episode"   : 1500,      # 1200 → 1500: cho thêm thời gian khám phá
+    "eps_decay"         : 0.9980,    # 0.996 → 0.998: chậm hơn, đạt 0.01 ~ep 2300
+    "eps_end"           : 0.01,
+    "eps_end_episode"   : 3000,      # 1500 → 3000: không hard-stop epsilon giữa chừng
+    "eps_diff_floor"    : 0.03,      # floor = difficulty * 0.03 — chỉ bind khi base ε rất thấp
 
     # Misc
     "target_update_freq": 2000,
     "use_soft_update"   : True,
-    "learn_every"       : 4,         # 2 → 4: pair với batch_size 512, cùng throughput
+    "learn_every"       : 2,         # 4 → 2: gấp đôi replay ratio. PPO làm 160 grad/4096 env
+                                     # ≈ 0.04 ratio; DQN giờ 256/2=128 grad transitions/env step.
+
+    # ── Random-speed coverage (an toàn hơn) ───────────────────
+    # CŨ: 50% ep random trên [INIT, INIT+(MAX-INIT)*difficulty=30] @ ε=1.0 →
+    #     dino chết trong 5-10 frame ở speed cao → PER buffer bị nuốt bởi
+    #     "high-speed=die" transitions → Q-net pessimistic ở speed cao.
+    # MỚI: 25% ep, cap ở 50% dải tốc độ, chỉ bật sau warmup_episodes để
+    #      agent có thời gian học basics ở base speed trước.
+    "random_start_prob"        : 0.25,
+    "random_start_max_factor"  : 0.50,    # cap = INIT + (MAX-INIT)*0.50*difficulty
+    "random_start_warmup_eps"  : 100,     # không random-start trước ep này
 }
 
 
@@ -308,10 +328,25 @@ class DQNDinoAI(BaseDinoAI):
         self.losses     = []
         self._loss_ema  = 0.0
 
+        # ── N-step bootstrap state ─────────────────────────────
+        # transient queue gom các transition liên tiếp; flush vào PER khi đủ
+        # n_step hoặc khi episode kết thúc (xem _push_transition).
+        self.n_step      = int(self.cfg.get("n_step", 1))
+        self.n_step_buffer = deque(maxlen=self.n_step)
+        self._gamma_n    = self.cfg["gamma"] ** self.n_step
+
+        # Rolling-avg model selection — lưu model khi rolling avg 30 ep > best_rolling_avg
+        # (thay vì lưu theo 1 ván may rủi gây eval mean=58 dù best=549).
+        self._eval_scores = deque(maxlen=30)
+        self._best_rolling_avg = 0.0
+        self._save_pending = False  # cờ để save model ở cuối episode sau khi đủ dữ liệu
+
         print(f"[{self.name}] Initialized. Device: {self.device}")
         print(f"  Architecture: Dueling {s} -> {h} -> [V: {ah}->1 | A: {ah}->{a}]")
         print(f"  PER: alpha={self.cfg.get('per_alpha', 0.6)}, "
               f"capacity={self.cfg['buffer_capacity']:,}")
+        print(f"  N-step={self.n_step}, gamma^n={self._gamma_n:.4f}, "
+              f"learn_every={self.cfg['learn_every']}")
 
     # ── Dự đoán action ─────────────────────────────────────
 
@@ -330,6 +365,53 @@ class DQNDinoAI(BaseDinoAI):
             t = torch.FloatTensor(state).unsqueeze(0).to(self.device)
             q = self.q_net(t)
             return int(q.argmax().item())
+
+    # ── N-step transition buffering ────────────────────────
+    #
+    # Mỗi transition đi vào n_step_buffer (deque maxlen=n). Khi buffer đầy
+    # HOẶC gặp terminal, đẩy 1 transition (s_t, a_t, R_t^(n), s_{t+n}, done) vào
+    # PER với R_t^(n) = Σ γ^k r_{t+k}. Trong _learn, target dùng γ^n cho bootstrap.
+    #
+    # Khi terminal (xảy ra giữa chừng), flush hết các shorter windows còn lại —
+    # tất cả đều terminal=True nên bootstrap=0, chỉ cần R_t^(k) chính xác là đủ.
+
+    def _compute_n_step_return(self) -> tuple:
+        """Tính (rew_accum, next_state, done) từ n_step_buffer hiện tại."""
+        rew       = 0.0
+        gamma_pow = 1.0
+        next_state = None
+        done       = False
+        gamma_b    = self.cfg["gamma"]
+        for _, _, r, ns, d in self.n_step_buffer:
+            rew       += gamma_pow * r
+            gamma_pow *= gamma_b
+            next_state = ns
+            done       = d
+            if d:
+                break
+        return rew, next_state, done
+
+    def _push_transition(self, state, action, reward, next_state, done):
+        """Đưa 1 transition vào n-step queue, đẩy head vào PER khi cần."""
+        self.n_step_buffer.append((state, action, reward, next_state, done))
+
+        # Chưa đủ n và chưa terminal → giữ trong queue
+        if len(self.n_step_buffer) < self.n_step and not done:
+            return
+
+        # Đẩy head
+        s0, a0 = self.n_step_buffer[0][0], self.n_step_buffer[0][1]
+        rew_n, next_n, done_n = self._compute_n_step_return()
+        self.buffer.push(s0, a0, rew_n, next_n, done_n)
+        self.n_step_buffer.popleft()
+
+        # Nếu terminal, flush tiếp các shorter windows còn lại
+        if done:
+            while self.n_step_buffer:
+                s0, a0 = self.n_step_buffer[0][0], self.n_step_buffer[0][1]
+                rew_n, next_n, done_n = self._compute_n_step_return()
+                self.buffer.push(s0, a0, rew_n, next_n, done_n)
+                self.n_step_buffer.popleft()
 
     # ── Học từ replay buffer ───────────────────────────────
 
@@ -354,11 +436,14 @@ class DQNDinoAI(BaseDinoAI):
 
         current_q = self.q_net(s).gather(1, a)
 
-        # Double DQN: chọn action bằng q_net, đánh giá bằng target_net
+        # Double DQN + N-step: chọn action bằng q_net, đánh giá bằng target_net.
+        # γ^n bootstrap — vì rewards đã được tích lũy n bước trong PER:
+        #   R_t^(n) = r_t + γ r_{t+1} + ... + γ^(n-1) r_{t+n-1}
+        #   target  = R_t^(n) + γ^n * Q_target(s_{t+n}, argmax) * (1 - done)
         with torch.no_grad():
             best_a   = self.q_net(ns).argmax(1, keepdim=True)
             next_q   = self.target_net(ns).gather(1, best_a)
-            target_q = r + self.cfg["gamma"] * next_q * (1 - d)
+            target_q = r + self._gamma_n * next_q * (1 - d)
 
         # PER: loss từng mẫu, nhân với IS weight
         elementwise_loss = self.loss_fn(current_q, target_q)
@@ -383,11 +468,16 @@ class DQNDinoAI(BaseDinoAI):
                                   self.q_net.parameters()):
                     tp.data.lerp_(op.data, tau)
 
-        # LR decay theo step, có sàn min_lr để không về 0
+        # Cosine LR annealing: lr → min_lr theo cosine curve.
+        # Multiplicative decay cũ (lr_decay=0.999999) quá chậm — đến ep 2500
+        # LR vẫn ~1.35e-4 → gradient updates mạnh phá policy đã hội tụ.
+        # Cosine: lr giảm dần về min_lr, flatten ở cuối → ổn định policy.
+        total_steps = self.cfg.get("cosine_T_max", 2_000_000)
         min_lr = self.cfg.get("min_lr", 5e-5)
-        lr_scale = max(min_lr / self.cfg["lr"], self.cfg["lr_decay"] ** self.steps)
+        progress = min(1.0, self.steps / total_steps)
+        lr_current = min_lr + (self.cfg["lr"] - min_lr) * 0.5 * (1.0 + np.cos(np.pi * progress))
         for param_group in self.optimizer.param_groups:
-            param_group['lr'] = self.cfg["lr"] * lr_scale
+            param_group['lr'] = lr_current
 
         # EMA loss để log mượt hơn
         alpha = 0.95
@@ -421,6 +511,8 @@ class DQNDinoAI(BaseDinoAI):
               f"(to {self.cfg['eps_end']} after ~"
               f"{int(-(np.log(self.cfg['eps_end'] / self.cfg['eps_start'])) / (-np.log(self.cfg['eps_decay'])))}"
               f" ep)")
+        print(f"  eps floor = difficulty × {self.cfg.get('eps_diff_floor', 0.20):.2f}  "
+              f"(exploration ∝ curriculum)")
         print(f"{'='*55}\n")
 
         os.makedirs(
@@ -431,32 +523,53 @@ class DQNDinoAI(BaseDinoAI):
         score_history = []
         best_score    = 0
 
+        # ── Random-start hyperparams (từ DQN_CONFIG) ──────────────
+        rs_prob   = self.cfg.get("random_start_prob", 0.25)
+        rs_factor = self.cfg.get("random_start_max_factor", 0.50)
+        rs_warmup = self.cfg.get("random_start_warmup_eps", 100)
+
+        # Path lưu best-raw model — bên cạnh best rolling-avg ở save_path chính.
+        # save_path: model selection trên rolling-avg 30 ep (ổn định)
+        # raw_save_path: model selection trên best ep_score (PPO-style, agressive)
+        # Final evaluation pick max(eval(rolling_avg_model), eval(raw_model))
+        if save_path.endswith(".pkl"):
+            raw_save_path = save_path[:-4] + "_raw.pkl"
+        else:
+            raw_save_path = save_path + "_raw"
+
         for ep in range(1, n_episodes + 1):
             policy.set_episode(ep)
             env   = DinoEnv(render=False, spawn_policy=policy)
             dino  = Dinosaur(env.sprites)
 
-            # ── Speed-range coverage ──────────────────────────────
-            # Episode bình thường kết thúc khi dino chết ở speed ~12, nên
-            # buffer gần như không có transition tốc độ cao → Q-net chưa từng
-            # học vùng đó → "phản ứng không kịp khi tốc độ tăng dần".
-            # 50% episode bắt đầu ở tốc độ ngẫu nhiên trên toàn dải để nạp
-            # thẳng transition tốc độ cao vào buffer. Các episode này chỉ dùng
-            # để phủ state-space — KHÔNG tính vào logging/curriculum/best.
-            if random.random() < 0.5:
-                start_speed = random.uniform(INIT_SPEED, MAX_SPEED)
+            # ── Speed-range coverage (an toàn hơn version cũ) ──────
+            # CŨ: 50% random trên [INIT, MAX*difficulty=30] → ở ε=1.0 dino chết
+            #     trong 5-10 frame ở speed cao → PER buffer bị dominate bởi
+            #     high-speed-death transitions (PER priority = |TD| lớn) →
+            #     Q-net học "high speed = die no matter what" → conservative.
+            # MỚI: 25% sau warmup, cap ở 0.5*dải tốc độ → max=18 thay vì 30.
+            #     Vẫn phủ được dải tốc độ trung-cao mà không poison buffer.
+            #     Score CỦA random-start cũng được dùng cho curriculum (chứ
+            #     không discard như cũ) — feedback đầy đủ cho P-controller.
+            if ep > rs_warmup and random.random() < rs_prob:
+                max_start = INIT_SPEED + (MAX_SPEED - INIT_SPEED) * rs_factor * policy.difficulty
+                start_speed = random.uniform(INIT_SPEED, max_start)
                 randomized  = True
             else:
                 start_speed = None
                 randomized  = False
             state = env.reset(dino, start_speed=start_speed)
 
+            # Reset n-step queue đầu episode — tránh leak transition từ ep trước
+            self.n_step_buffer.clear()
+
             ep_reward = 0
             for _ in range(max_steps_per_ep):
                 action = self._select_action(state, training=True)
                 next_state, env_reward, done, info = env.step_single(dino, action)
 
-                self.buffer.push(state, action, env_reward, next_state, done)
+                # N-step buffering thay cho push trực tiếp
+                self._push_transition(state, action, env_reward, next_state, done)
                 state      = next_state
                 ep_reward += env_reward
                 self.steps += 1
@@ -471,43 +584,78 @@ class DQNDinoAI(BaseDinoAI):
                 if done:
                     break
 
-            # Decay epsilon
-            if ep <= self.cfg.get("eps_end_episode", 1200):
-                self.epsilon = max(self.cfg["eps_end"],
-                                   self.epsilon * self.cfg["eps_decay"])
+            # Decay epsilon — base decay + difficulty floor
+            # Khi curriculum mở khóa pattern mới (difficulty cao), agent cần
+            # exploration để học pattern đó. eps_diff_floor đảm bảo epsilon
+            # không bao giờ xuống dưới difficulty * 0.03.
+            diff_floor = max(0.0, policy.difficulty * self.cfg.get("eps_diff_floor", 0.03))
+            if ep <= self.cfg.get("eps_end_episode", 3000):
+                base_eps = self.epsilon * self.cfg["eps_decay"]
+                self.epsilon = max(self.cfg["eps_end"], base_eps, diff_floor)
             else:
-                self.epsilon = self.cfg["eps_end"]
+                self.epsilon = max(self.cfg["eps_end"], diff_floor)
+
+            # Late-training stabilization: giảm tau (target net cập nhật chậm hơn)
+            # và giữ epsilon tối thiểu 0.01 để tránh greedy collapse.
+            progress = ep / max(1, n_episodes)
+            if progress > 0.8:
+                self.cfg["tau"] = 0.0005
+                self.epsilon = max(0.01, self.epsilon)
 
             ep_score = info["points"]
             self.generation = ep
 
-            # Episode random-start chỉ để phủ dải tốc độ — điểm của nó thấp
-            # giả tạo (bắt đầu giữa game) nên không đưa vào logging, không
-            # dùng điều khiển curriculum, và không tính best score.
+            # ── Score accounting ──────────────────────────────────
+            # score_history & policy.update_performance: nhận TẤT CẢ episode
+            #   → P-controller có feedback đầy đủ (random-start vẫn là gameplay
+            #   thật, dù điểm thấp giả tạo do bắt đầu giữa game).
+            # self._eval_scores (rolling-avg window): CHỈ normal start →
+            #   tránh skewing baseline. Mixing random-start sẽ kéo rolling_avg
+            #   xuống thấp giả tạo, làm threshold "beat best_rolling_avg" sai.
+            score_history.append(ep_score)
+            policy.update_performance(ep_score)
+
+            # ── Model saving — DOUBLE TRACK ───────────────────────
+            # Skip cả 2 nếu là random-start (điểm bị skewed thấp giả tạo
+            # do bắt đầu giữa game).
+            # (1) Best raw: PPO-style — ngay khi vượt best_score → save raw.
+            #     Catch những moment đỉnh cao mà rolling avg miss.
+            # (2) Best rolling-avg: lưu khi rolling_avg 30 ep > prev best.
+            #     Đảm bảo model ổn định, không phải may rủi 1 ván.
             if not randomized:
-                score_history.append(ep_score)
-                policy.update_performance(ep_score)
+                self._eval_scores.append(ep_score)
 
                 if ep_score > best_score:
-                    best_score      = ep_score
+                    best_score = ep_score
                     self.best_score = best_score
-                    self.save_model(save_path)
+                    self.save_model(raw_save_path)
+
+                if len(self._eval_scores) >= 10:
+                    rolling_avg = np.mean(self._eval_scores)
+                    if rolling_avg > self._best_rolling_avg:
+                        self._best_rolling_avg = rolling_avg
+                        self.save_model(save_path)
 
             if ep % verbose_every == 0:
                 recent    = score_history[-verbose_every:]
                 avg_score = np.mean(recent)
                 buf_size  = len(self.buffer)
+                roll_info = f"roll={self._best_rolling_avg:.0f}" if len(self._eval_scores) >= 10 else "roll=--"
                 print(f"  Ep {ep:>5}/{n_episodes} | "
                       f"Score avg={avg_score:>7.1f} best={best_score:>6} | "
                       f"ε={self.epsilon:.3f} | "
                       f"loss={self._loss_ema:.4f} | "
                       f"diff={policy.difficulty:.2f} | "
-                      f"buf={buf_size:>6}")
+                      f"buf={buf_size:>6} | "
+                      f"{roll_info}")
 
             env.close()
 
-        print(f"\n  Done! Best score: {best_score}")
-        print(f"  Model saved to: {save_path}\n")
+        print(f"\n  Done! Best score: {best_score}  "
+              f"(best rolling-avg: {self._best_rolling_avg:.0f})")
+        print(f"  Models saved:")
+        print(f"    Rolling-avg → {save_path}")
+        print(f"    Best-raw    → {raw_save_path}\n")
         return score_history
 
     # ── Lưu / Tải model ────────────────────────────────────
@@ -523,9 +671,10 @@ class DQNDinoAI(BaseDinoAI):
             "epsilon"         : self.epsilon,
             "steps"           : self.steps,
             "best_score"      : self.best_score,
+            "best_rolling_avg": self._best_rolling_avg,
             "generation"      : self.generation,
             "config"          : self.cfg,
-            "model_version"   : 2,
+            "model_version"   : 4,
         }
         with open(path, "wb") as f:
             pickle.dump(data, f)
@@ -554,6 +703,8 @@ class DQNDinoAI(BaseDinoAI):
         self.steps      = data.get("steps",      0)
         self.best_score = data.get("best_score", 0)
         self.generation = data.get("generation", 0)
+        self._best_rolling_avg = data.get("best_rolling_avg", 0.0)
         self.q_net.eval()
         print(f"[{self.name}] Loaded model from {path}  "
-              f"(best={self.best_score}, gen={self.generation}, v{version})")
+              f"(best={self.best_score}, roll_avg={self._best_rolling_avg:.0f}, "
+              f"gen={self.generation}, v{version})")
